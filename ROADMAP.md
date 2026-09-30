@@ -135,22 +135,22 @@ La v0.3 arrive en 7 à 10 jours avec un moteur qui manipule des octets, où un f
 
 **Moteur**
 
-- [ ] I13 · Workspace Cargo : `crates/converter-core` sans Tauri, dont dépend `src-tauri` ; les tests du moteur tournent sans webview.
-- [ ] B1 A1 · Trait `Codec` sur des octets (`&[u8]` → `Vec<u8>`) ; chaque format déclare s'il attend du texte UTF-8.
-- [ ] B5 A1 · Registre des formats : identifiant, libellé, catégorie, alias, réversible ou non, schéma d'options (booléen, choix, entier borné, texte, secret).
-- [ ] B5 · Porter les 12 formats, chacun dans son fichier avec ses tests.
-- [ ] A2 · Erreur structurée (`thiserror`) : code traduisible, message, plage fautive.
-- [ ] A1 · Commandes `list_codecs` et `convert` (async) ; sortie en texte si l'UTF-8 est valide, sinon en octets.
-- [ ] A3 · Types TypeScript générés depuis Rust (`tauri-specta` ou `ts-rs`) ; la CI vérifie qu'ils sont à jour.
-- [ ] A7 · Option Base64 URL-safe sans « = », pour les JWT.
-- [ ] A8 · URL : mode « composant » (actuel) et mode « URI complète » qui garde `:/?#&=` ; option « + = espace ».
-- [ ] A9 · Renommer « ASCII Décimal/Octal » en « Octets (décimal/octal) ».
+- [x] I13 · Workspace Cargo : `crates/converter-core` sans Tauri, dont dépend `src-tauri` ; les tests du moteur tournent sans webview.
+- [x] B1 A1 · Trait `Codec` sur des octets (`&[u8]` → `Vec<u8>`) ; chaque format déclare s'il attend du texte UTF-8.
+- [x] B5 A1 · Registre des formats : identifiant, libellé, catégorie, alias, réversible ou non, schéma d'options (booléen, choix, entier borné, texte, secret).
+- [x] B5 · Porter les 12 formats, chacun dans son fichier avec ses tests.
+- [x] A2 · Erreur structurée (`thiserror`) : code traduisible, message, plage fautive.
+- [x] A1 · Commandes `list_codecs` et `convert` (async) ; sortie en texte si l'UTF-8 est valide, sinon en octets.
+- [x] A3 · Types TypeScript générés depuis Rust (`tauri-specta` ou `ts-rs`) ; la CI vérifie qu'ils sont à jour.
+- [x] A7 · Option Base64 URL-safe sans « = », pour les JWT.
+- [x] A8 · URL : mode « composant » (actuel) et mode « URI complète » qui garde `:/?#&=` ; option « + = espace ».
+- [x] A9 · Renommer « ASCII Décimal/Octal » en « Octets (décimal/octal) ».
 
 **Interface**
 
-- [ ] B5 A16 · Onglets et options construits depuis `list_codecs`, onglets groupés par catégorie.
-- [ ] A2 · Surligner la plage fautive dans l'entrée et afficher sa position.
-- [ ] A17 · Accessibilité dès la reconstruction : `role="tablist"` et `tab`, `aria-selected`, `aria-pressed`, `role="alert"`, `aria-live`, flèches du clavier.
+- [x] B5 A16 · Onglets et options construits depuis `list_codecs`, onglets groupés par catégorie.
+- [x] A2 · Surligner la plage fautive dans l'entrée et afficher sa position.
+- [x] A17 · Accessibilité dès la reconstruction : `role="tablist"` et `tab`, `aria-selected`, `aria-pressed`, `role="alert"`, `aria-live`, flèches du clavier.
 
 **Sortie :** ajouter un format ne touche qu'un fichier Rust et son test, et les tests des phases 0 et 1 passent à l'identique.
 
@@ -297,12 +297,12 @@ La v1.0 sort en 4 à 7 jours : installable, signée, documentée, avec son outil
 
 ## Décisions à prendre
 
-Sept choix restent à faire ; celui du framework bloque le début de la phase 2.
+Deux choix sont faits (licence, framework), cinq restent à faire.
 
 | Décision | Options | Recommandation | Avant la phase |
 | --- | --- | --- | --- |
-| Licence | MIT, Apache-2.0, MIT + Apache-2.0, GPL-3.0 | MIT + Apache-2.0, l'usage courant en Rust | 0 |
-| Framework de l'interface | TypeScript seul, Svelte 5, Solid, Preact | Svelte 5 : léger, compilé, proposé par create-tauri-app ; l'éditeur de chaîne serait lourd sans framework | 2 |
+| Licence | MIT, Apache-2.0, MIT + Apache-2.0, GPL-3.0 | Décidé (phase 0) : MIT + Apache-2.0 | 0 |
+| Framework de l'interface | TypeScript seul, Svelte 5, Solid, Preact | Décidé (phase 2) : Svelte 5 | 2 |
 | Enregistrement des recettes | Export seul, ou liste « Mes recettes » sur action explicite | Les deux : une recette ne contient aucune donnée saisie | 3 |
 | Format de chiffrement | `age`, ou enveloppe maison AES-256-GCM ou XChaCha20 + Argon2id | `age` : standard, audité, interopérable | 6 |
 | Mises à jour | Aucune, vérification manuelle, automatique | Manuelle par défaut, automatique en option : chaque requête réseau doit être choisie | 8 |
