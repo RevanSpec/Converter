@@ -1,7 +1,10 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::alphabet;
+use base64::engine::{general_purpose, DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+use base64::{DecodeError, Engine as _};
 use idna::punycode;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +53,20 @@ pub struct ConvertOptions {
     pub base64_url_safe: Option<bool>,
     pub caesar_shift: Option<i32>,
     pub punycode_prefix: Option<bool>,
+    pub morse_unknown: Option<MorseUnknown>,
+}
+
+/// Traitement, à l'encodage Morse, des caractères qui n'ont pas de code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MorseUnknown {
+    /// Erreur au premier caractère sans code.
+    Error,
+    /// Lettres accentuées ramenées à leur lettre de base (à → A) ; erreur pour le reste.
+    #[default]
+    Transliterate,
+    /// Translittération si possible, sinon le caractère est écarté.
+    Ignore,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,7 +169,7 @@ pub fn encode(
             }
         }
         ConverterFormat::Base32 => Ok(base32_encode(input.as_bytes())),
-        ConverterFormat::Morse => Ok(text_to_morse(input)),
+        ConverterFormat::Morse => text_to_morse(input, options.morse_unknown.unwrap_or_default()),
         ConverterFormat::AsciiDec => {
             let parts: Vec<String> = input.as_bytes().iter().map(|b| b.to_string()).collect();
             Ok(parts.join(" "))
@@ -171,10 +188,9 @@ pub fn encode(
             let shift = options.caesar_shift.unwrap_or(13);
             Ok(caesar_shift(input, shift))
         }
-        ConverterFormat::Reverse => Ok(input.chars().rev().collect()),
+        ConverterFormat::Reverse => Ok(reverse_graphemes(input)),
         ConverterFormat::Punycode => {
-            let use_prefix = options.punycode_prefix.unwrap_or(true);
-            Ok(punycode_encode(input, use_prefix))
+            punycode_encode(input, options.punycode_prefix.unwrap_or(true))
         }
     }
 }
@@ -187,119 +203,23 @@ pub fn decode(
     format: ConverterFormat,
     options: &ConvertOptions,
 ) -> Result<String, String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
+    if input.is_empty() {
         return Ok(String::new());
     }
 
+    // Pas de trim global : les formats textuels gardent l'entrée intacte,
+    // les autres ignorent eux-mêmes les blancs.
     match format {
-        ConverterFormat::Hex => {
-            // Nettoyage : retirer préfixes 0x, espaces, virgules, deux-points
-            let cleaned = trimmed
-                .replace("0x", "")
-                .replace("0X", "")
-                .replace([' ', ':', ',', '\n', '\r', '\t'], "");
-
-            if !cleaned.len().is_multiple_of(2) {
-                return Err(format!(
-                    "Longueur hexadécimale impaire ({} caractères). Chaque octet nécessite 2 caractères hexadécimaux.",
-                    cleaned.len()
-                ));
-            }
-
-            let bytes = hex::decode(&cleaned).map_err(|e| match e {
-                hex::FromHexError::InvalidHexCharacter { c, index } => {
-                    format!(
-                        "Caractère hexadécimal invalide '{}' à la position {}.",
-                        c, index
-                    )
-                }
-                hex::FromHexError::OddLength => "Longueur hexadécimale impaire.".to_string(),
-                _ => format!("Erreur de décodage hexadécimal: {}", e),
-            })?;
-
-            String::from_utf8(bytes).map_err(|e| {
-                format!(
-                    "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
-                    e.utf8_error().valid_up_to()
-                )
-            })
-        }
-        ConverterFormat::Binary => {
-            let cleaned: String = trimmed
-                .chars()
-                .filter(|c| !c.is_whitespace() && *c != ',' && *c != '-')
-                .collect();
-
-            if cleaned.is_empty() {
-                return Ok(String::new());
-            }
-
-            for (i, c) in cleaned.chars().enumerate() {
-                if c != '0' && c != '1' {
-                    return Err(format!(
-                        "Caractère binaire invalide '{}' à la position {}. Seuls '0' et '1' sont autorisés.",
-                        c, i
-                    ));
-                }
-            }
-
-            if !cleaned.len().is_multiple_of(8) {
-                return Err(format!(
-                    "Longueur binaire invalide ({} bits). Elle doit être un multiple de 8 bits.",
-                    cleaned.len()
-                ));
-            }
-
-            let mut bytes = Vec::with_capacity(cleaned.len() / 8);
-            for chunk in cleaned.as_bytes().chunks(8) {
-                let s = std::str::from_utf8(chunk).unwrap();
-                let byte = u8::from_str_radix(s, 2)
-                    .map_err(|_| "Erreur de conversion binaire".to_string())?;
-                bytes.push(byte);
-            }
-
-            String::from_utf8(bytes).map_err(|e| {
-                format!(
-                    "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
-                    e.utf8_error().valid_up_to()
-                )
-            })
-        }
-        ConverterFormat::Base64 => {
-            let cleaned: String = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
-            let url_safe = options.base64_url_safe.unwrap_or(false);
-
-            let bytes = if url_safe {
-                general_purpose::URL_SAFE
-                    .decode(&cleaned)
-                    .or_else(|_| general_purpose::STANDARD.decode(&cleaned))
-            } else {
-                general_purpose::STANDARD
-                    .decode(&cleaned)
-                    .or_else(|_| general_purpose::URL_SAFE.decode(&cleaned))
-            }
-            .map_err(|e| format!("Chaîne Base64 invalide: {}", e))?;
-
-            String::from_utf8(bytes).map_err(|e| {
-                format!(
-                    "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
-                    e.utf8_error().valid_up_to()
-                )
-            })
-        }
-        ConverterFormat::Base32 => {
-            let bytes = base32_decode(trimmed)?;
-            String::from_utf8(bytes).map_err(|e| {
-                format!(
-                    "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
-                    e.utf8_error().valid_up_to()
-                )
-            })
-        }
-        ConverterFormat::Morse => morse_to_text(trimmed),
+        ConverterFormat::Hex => utf8_text(hex_decode(input)?),
+        ConverterFormat::Binary => utf8_text(binary_decode(input)?),
+        ConverterFormat::Base64 => utf8_text(base64_decode(
+            input,
+            options.base64_url_safe.unwrap_or(false),
+        )?),
+        ConverterFormat::Base32 => utf8_text(base32_decode(input)?),
+        ConverterFormat::Morse => morse_to_text(input),
         ConverterFormat::AsciiDec => {
-            let tokens = trimmed.split(|c: char| c.is_whitespace() || c == ',' || c == ';');
+            let tokens = input.split(|c: char| c.is_whitespace() || c == ',' || c == ';');
             let mut bytes = Vec::new();
             for (i, token) in tokens.filter(|t| !t.is_empty()).enumerate() {
                 let val: u8 = token.parse().map_err(|_| {
@@ -311,15 +231,10 @@ pub fn decode(
                 })?;
                 bytes.push(val);
             }
-            String::from_utf8(bytes).map_err(|e| {
-                format!(
-                    "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
-                    e.utf8_error().valid_up_to()
-                )
-            })
+            utf8_text(bytes)
         }
         ConverterFormat::AsciiOct => {
-            let tokens = trimmed.split(|c: char| c.is_whitespace() || c == ',' || c == ';');
+            let tokens = input.split(|c: char| c.is_whitespace() || c == ',' || c == ';');
             let mut bytes = Vec::new();
             for (i, token) in tokens.filter(|t| !t.is_empty()).enumerate() {
                 let val = u8::from_str_radix(token, 8).map_err(|_| {
@@ -331,26 +246,181 @@ pub fn decode(
                 })?;
                 bytes.push(val);
             }
-            String::from_utf8(bytes).map_err(|e| {
-                format!(
-                    "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
-                    e.utf8_error().valid_up_to()
-                )
-            })
+            utf8_text(bytes)
         }
-        ConverterFormat::Url => url_decode(trimmed),
-        ConverterFormat::Html => html_unescape(trimmed),
+        ConverterFormat::Url => url_decode(input),
+        ConverterFormat::Html => Ok(htmlize::unescape(input).into_owned()),
         ConverterFormat::Caesar => {
             let shift = options.caesar_shift.unwrap_or(13);
-            Ok(caesar_shift(trimmed, -shift))
+            Ok(caesar_shift(input, -(shift.rem_euclid(26))))
         }
-        ConverterFormat::Reverse => Ok(trimmed.chars().rev().collect()),
-        ConverterFormat::Punycode => punycode_decode(trimmed),
+        ConverterFormat::Reverse => Ok(reverse_graphemes(input)),
+        ConverterFormat::Punycode => {
+            punycode_decode(input, options.punycode_prefix.unwrap_or(true))
+        }
     }
 }
 
+/// Convertit les octets décodés en texte, ou explique pourquoi ce n'est pas de l'UTF-8.
+fn utf8_text(bytes: Vec<u8>) -> Result<String, String> {
+    String::from_utf8(bytes).map_err(|e| {
+        format!(
+            "Les octets décodés ne constituent pas un texte UTF-8 valide (erreur à l'octet {}).",
+            e.utf8_error().valid_up_to()
+        )
+    })
+}
+
+/// Retire les blancs de `input` et garde, pour chaque caractère conservé,
+/// sa position dans le texte saisi (le premier caractère est en position 1).
+fn strip_whitespace(input: &str) -> (String, Vec<usize>) {
+    let mut cleaned = String::with_capacity(input.len());
+    let mut positions = Vec::with_capacity(input.len());
+    for (index, c) in input.chars().enumerate() {
+        if !c.is_whitespace() {
+            cleaned.push(c);
+            positions.push(index + 1);
+        }
+    }
+    (cleaned, positions)
+}
+
 // ==========================================
-// BASE32 IMPLEMENTATION (RFC 4648)
+// HEXADÉCIMAL
+// ==========================================
+/// Accepte les préfixes `0x`, `\x` et `%`, et les séparateurs blancs, `:`, `,`, `-` et `;`.
+fn hex_decode(input: &str) -> Result<Vec<u8>, String> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut digits = Vec::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if matches!(c, '0' | '\\') && matches!(chars.get(i + 1).copied(), Some('x' | 'X')) {
+            i += 2;
+            continue;
+        }
+        match c.to_digit(16) {
+            Some(digit) => digits.push(digit as u8),
+            None if c.is_whitespace() || matches!(c, '%' | ':' | ',' | '-' | ';') => {}
+            None => {
+                return Err(format!(
+                    "Caractère hexadécimal invalide « {c} » en position {}.",
+                    i + 1
+                ))
+            }
+        }
+        i += 1;
+    }
+
+    if !digits.len().is_multiple_of(2) {
+        return Err(format!(
+            "Nombre impair de chiffres hexadécimaux ({}) : chaque octet en demande 2.",
+            digits.len()
+        ));
+    }
+
+    Ok(digits
+        .chunks(2)
+        .map(|pair| (pair[0] << 4) | pair[1])
+        .collect())
+}
+
+// ==========================================
+// BINAIRE
+// ==========================================
+/// Accepte les séparateurs blancs, `,` et `-` entre les bits.
+fn binary_decode(input: &str) -> Result<Vec<u8>, String> {
+    let mut bits = Vec::with_capacity(input.len());
+    for (index, c) in input.chars().enumerate() {
+        match c {
+            '0' => bits.push(0u8),
+            '1' => bits.push(1u8),
+            c if c.is_whitespace() || c == ',' || c == '-' => {}
+            _ => {
+                return Err(format!(
+                "Caractère binaire invalide « {c} » en position {} : seuls 0 et 1 sont autorisés.",
+                index + 1
+            ))
+            }
+        }
+    }
+
+    if !bits.len().is_multiple_of(8) {
+        return Err(format!(
+            "Nombre de bits invalide ({}) : il faut un multiple de 8.",
+            bits.len()
+        ));
+    }
+
+    Ok(bits
+        .chunks(8)
+        .map(|byte| byte.iter().fold(0u8, |acc, &bit| (acc << 1) | bit))
+        .collect())
+}
+
+// ==========================================
+// BASE64 (RFC 4648)
+// ==========================================
+/// Décodeurs tolérants : le « = » final est facultatif (JWT, paramètres d'URL…).
+const BASE64_STANDARD: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
+const BASE64_URL_SAFE: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::URL_SAFE,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
+
+/// Décode du Base64, avec ou sans padding ; l'alphabet est déduit des caractères présents.
+fn base64_decode(input: &str, prefer_url_safe: bool) -> Result<Vec<u8>, String> {
+    let (cleaned, positions) = strip_whitespace(input);
+    let url_safe = cleaned.contains(['-', '_']);
+    let standard = cleaned.contains(['+', '/']);
+    if url_safe && standard {
+        return Err(
+            "Base64 invalide : le texte mélange l'alphabet standard (+ /) et l'alphabet URL-safe (- _)."
+                .to_string(),
+        );
+    }
+
+    let engine = if url_safe || (prefer_url_safe && !standard) {
+        &BASE64_URL_SAFE
+    } else {
+        &BASE64_STANDARD
+    };
+
+    // Caractère à l'octet `offset` du texte nettoyé, et sa position dans le texte saisi.
+    let locate = |offset: usize| {
+        let index = cleaned.get(..offset).map_or(0, |s| s.chars().count());
+        let c = cleaned
+            .get(offset..)
+            .and_then(|s| s.chars().next())
+            .unwrap_or('?');
+        (c, positions.get(index).copied().unwrap_or(index + 1))
+    };
+
+    engine.decode(&cleaned).map_err(|e| match e {
+        DecodeError::InvalidByte(offset, _) => {
+            let (c, position) = locate(offset);
+            format!("Caractère Base64 invalide « {c} » en position {position}.")
+        }
+        DecodeError::InvalidLastSymbol(offset, _) => {
+            let (c, position) = locate(offset);
+            format!(
+                "Dernier caractère Base64 « {c} » (position {position}) incohérent : le texte est peut-être tronqué."
+            )
+        }
+        DecodeError::InvalidLength(length) => format!(
+            "Longueur Base64 impossible ({length} caractères utiles) : le texte est peut-être tronqué."
+        ),
+        DecodeError::InvalidPadding => {
+            "Padding Base64 invalide : les « = » doivent terminer le texte.".to_string()
+        }
+    })
+}
+
+// ==========================================
+// BASE32 (RFC 4648)
 // ==========================================
 const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -382,38 +452,66 @@ fn base32_encode(data: &[u8]) -> String {
     result
 }
 
+/// Décode du Base32 en majuscules ou minuscules, avec ou sans padding.
 fn base32_decode(input: &str) -> Result<Vec<u8>, String> {
-    let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
-    let mut buffer: u64 = 0;
-    let mut bits_left = 0;
-    let mut result = Vec::new();
+    let (cleaned, positions) = strip_whitespace(input);
+    let chars: Vec<char> = cleaned.chars().collect();
+    let data_len = chars.iter().position(|&c| c == '=').unwrap_or(chars.len());
+    let (data, padding) = chars.split_at(data_len);
 
-    for (pos, ch) in cleaned.chars().enumerate() {
-        if ch == '=' {
-            break;
-        }
-        let upper = ch.to_ascii_uppercase();
-        let val = match upper {
-            'A'..='Z' => (upper as u8 - b'A') as u64,
-            '2'..='7' => (upper as u8 - b'2' + 26) as u64,
+    if let Some(offset) = padding.iter().position(|&c| c != '=') {
+        let index = data_len + offset;
+        return Err(format!(
+            "Caractère « {} » après le padding Base32, en position {}.",
+            chars[index], positions[index]
+        ));
+    }
+
+    let mut buffer: u64 = 0;
+    let mut bits = 0;
+    let mut bytes = Vec::with_capacity(data.len() * 5 / 8);
+    for (index, &c) in data.iter().enumerate() {
+        let value = match c.to_ascii_uppercase() {
+            letter @ 'A'..='Z' => letter as u64 - 'A' as u64,
+            digit @ '2'..='7' => digit as u64 - '2' as u64 + 26,
             _ => {
                 return Err(format!(
-                    "Caractère Base32 invalide '{}' à la position {}.",
-                    ch, pos
+                    "Caractère Base32 invalide « {c} » en position {}.",
+                    positions[index]
                 ))
             }
         };
-
-        buffer = (buffer << 5) | val;
-        bits_left += 5;
-
-        if bits_left >= 8 {
-            bits_left -= 8;
-            result.push(((buffer >> bits_left) & 0xFF) as u8);
+        buffer = (buffer << 5) | value;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            bytes.push((buffer >> bits) as u8);
         }
     }
 
-    Ok(result)
+    // Seules ces longueurs utiles (modulo 8) donnent un nombre entier d'octets.
+    let expected_padding = match data.len() % 8 {
+        0 => 0,
+        2 => 6,
+        4 => 4,
+        5 => 3,
+        7 => 1,
+        _ => {
+            return Err(format!(
+            "Longueur Base32 impossible ({} caractères utiles) : le texte est peut-être tronqué.",
+            data.len()
+        ))
+        }
+    };
+    if !padding.is_empty() && padding.len() != expected_padding {
+        return Err(format!(
+            "Padding Base32 incohérent : {} « = » pour {} caractères utiles ({expected_padding} attendus).",
+            padding.len(),
+            data.len()
+        ));
+    }
+
+    Ok(bytes)
 }
 
 // ==========================================
@@ -475,6 +573,8 @@ fn morse_char(c: char) -> Option<&'static str> {
         '"' => Some(".-..-."),
         '$' => Some("...-..-"),
         '@' => Some(".--.-."),
+        // Seule lettre accentuée de la recommandation ITU.
+        'É' | 'é' => Some("..-.."),
         _ => None,
     }
 }
@@ -535,47 +635,95 @@ fn morse_to_char(m: &str) -> Option<char> {
         ".-..-." => Some('"'),
         "...-..-" => Some('$'),
         ".--.-." => Some('@'),
+        "..-.." => Some('É'),
         _ => None,
     }
 }
 
-fn text_to_morse(text: &str) -> String {
-    let mut words = Vec::new();
-    for word in text.split_whitespace() {
-        let mut letters = Vec::new();
-        for ch in word.chars() {
-            if let Some(m) = morse_char(ch) {
-                letters.push(m.to_string());
-            } else {
-                letters.push(ch.to_string());
+/// Lettre de base d'un caractère accentué (à → A) ou équivalent ASCII d'une ponctuation
+/// typographique (’ → '), pour les caractères que le Morse ne connaît pas.
+fn transliterate(c: char) -> Option<&'static str> {
+    Some(match c {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' => "A",
+        'ç' | 'Ç' => "C",
+        'è' | 'ê' | 'ë' | 'È' | 'Ê' | 'Ë' => "E",
+        'ì' | 'í' | 'î' | 'ï' | 'Ì' | 'Í' | 'Î' | 'Ï' => "I",
+        'ñ' | 'Ñ' => "N",
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' => "O",
+        'ù' | 'ú' | 'û' | 'ü' | 'Ù' | 'Ú' | 'Û' | 'Ü' => "U",
+        'ý' | 'ÿ' | 'Ý' | 'Ÿ' => "Y",
+        'æ' | 'Æ' => "AE",
+        'œ' | 'Œ' => "OE",
+        'ß' => "SS",
+        '’' | '‘' => "'",
+        '«' | '»' | '“' | '”' => "\"",
+        _ => return None,
+    })
+}
+
+/// Lettres séparées par une espace, mots par « / », lignes par un retour à la ligne.
+fn text_to_morse(text: &str, unknown: MorseUnknown) -> Result<String, String> {
+    // Chaque caractère est gardé, translittéré, écarté ou refusé selon `unknown`.
+    let mut normalized = String::with_capacity(text.len());
+    for (index, c) in text.chars().enumerate() {
+        if c.is_whitespace() || morse_char(c).is_some() {
+            normalized.push(c);
+            continue;
+        }
+        let base = transliterate(c);
+        match (unknown, base) {
+            (MorseUnknown::Transliterate | MorseUnknown::Ignore, Some(base)) => {
+                normalized.push_str(base)
+            }
+            (MorseUnknown::Ignore, None) => {}
+            (MorseUnknown::Error, Some(base)) => {
+                return Err(format!(
+                    "« {c} » (position {}) n'existe pas en Morse : choisissez « Translittérer » pour le remplacer par « {base} ».",
+                    index + 1
+                ))
+            }
+            (_, None) => {
+                return Err(format!(
+                    "« {c} » (position {}) n'existe pas en Morse : choisissez « Ignorer » pour l'écarter.",
+                    index + 1
+                ))
             }
         }
-        words.push(letters.join(" "));
     }
-    words.join(" / ")
+
+    let lines: Vec<String> = normalized
+        .split('\n')
+        .map(|line| {
+            line.split_whitespace()
+                .map(|word| {
+                    word.chars()
+                        .filter_map(morse_char)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect::<Vec<_>>()
+                .join(" / ")
+        })
+        .collect();
+    Ok(lines.join("\n"))
 }
 
 fn morse_to_text(morse: &str) -> Result<String, String> {
-    let mut result = String::new();
-    let words = morse.split('/');
-
-    for (w_idx, word) in words.enumerate() {
-        if w_idx > 0 {
-            result.push(' ');
-        }
-        for token in word.split_whitespace() {
-            if token.is_empty() {
-                continue;
+    let mut lines = Vec::new();
+    for line in morse.split('\n') {
+        let mut words = Vec::new();
+        for word in line.split('/') {
+            let mut text = String::new();
+            for code in word.split_whitespace() {
+                let c = morse_to_char(code)
+                    .ok_or_else(|| format!("Code Morse invalide ou non reconnu : « {code} »."))?;
+                text.push(c);
             }
-            if let Some(c) = morse_to_char(token) {
-                result.push(c);
-            } else {
-                return Err(format!("Code Morse invalide ou non reconnu: '{}'", token));
-            }
+            words.push(text);
         }
+        lines.push(words.join(" "));
     }
-
-    Ok(result)
+    Ok(lines.join("\n"))
 }
 
 // ==========================================
@@ -598,6 +746,15 @@ fn caesar_shift(text: &str, shift: i32) -> String {
             }
         })
         .collect()
+}
+
+// ==========================================
+// INVERSION
+// ==========================================
+/// Inverse l'ordre des graphèmes : un emoji composé ou une lettre suivie
+/// d'un accent combinant reste intact.
+fn reverse_graphemes(text: &str) -> String {
+    text.graphemes(true).rev().collect()
 }
 
 // ==========================================
@@ -639,12 +796,7 @@ fn url_decode(text: &str) -> Result<String, String> {
         }
     }
 
-    String::from_utf8(bytes).map_err(|e| {
-        format!(
-            "La chaîne décodée ne forme pas un texte UTF-8 valide (erreur à l'octet {}).",
-            e.utf8_error().valid_up_to()
-        )
-    })
+    utf8_text(bytes)
 }
 
 // ==========================================
@@ -665,176 +817,72 @@ fn html_escape(text: &str) -> String {
     res
 }
 
-fn html_unescape(text: &str) -> Result<String, String> {
-    let mut res = String::new();
-    let mut i = 0;
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-
-    while i < len {
-        if chars[i] == '&' {
-            // Find terminating ';'
-            let mut end = i + 1;
-            while end < len && end - i < 12 && chars[end] != ';' {
-                end += 1;
+// ==========================================
+// PUNYCODE (RFC 3492 / IDN)
+// ==========================================
+/// Applique `convert` à chaque mot (suite de caractères non blancs)
+/// et conserve les blancs tels quels, retours à la ligne compris.
+fn map_words(
+    input: &str,
+    mut convert: impl FnMut(&str) -> Result<String, String>,
+) -> Result<String, String> {
+    let mut output = String::with_capacity(input.len());
+    let mut word_start = None;
+    for (i, c) in input.char_indices() {
+        if c.is_whitespace() {
+            if let Some(start) = word_start.take() {
+                output.push_str(&convert(&input[start..i])?);
             }
-
-            if end < len && chars[end] == ';' {
-                let entity: String = chars[i + 1..end].iter().collect();
-                if let Some(ch) = match entity.as_str() {
-                    "amp" => Some('&'),
-                    "lt" => Some('<'),
-                    "gt" => Some('>'),
-                    "quot" => Some('"'),
-                    "apos" | "#39" => Some('\''),
-                    "nbsp" => Some('\u{00A0}'),
-                    "copy" => Some('©'),
-                    "reg" => Some('®'),
-                    "euro" => Some('€'),
-                    s if s.starts_with("#x") || s.starts_with("#X") => {
-                        u32::from_str_radix(&s[2..], 16)
-                            .ok()
-                            .and_then(char::from_u32)
-                    }
-                    s if s.starts_with('#') => s[1..].parse::<u32>().ok().and_then(char::from_u32),
-                    _ => None,
-                } {
-                    res.push(ch);
-                    i = end + 1;
-                    continue;
-                }
-            }
+            output.push(c);
+        } else if word_start.is_none() {
+            word_start = Some(i);
         }
-        res.push(chars[i]);
-        i += 1;
     }
-
-    Ok(res)
+    if let Some(start) = word_start {
+        output.push_str(&convert(&input[start..])?);
+    }
+    Ok(output)
 }
 
-// ==========================================
-// PUNYCODE IMPLEMENTATION (RFC 3492 / IDN)
-// ==========================================
-fn punycode_encode(input: &str, use_prefix: bool) -> String {
-    let mut result_lines = Vec::new();
-
-    for line in input.lines() {
-        if line.contains('.') {
-            let labels: Vec<String> = line
-                .split('.')
-                .map(|label| {
-                    if label.is_ascii() {
-                        label.to_string()
-                    } else {
-                        match punycode::encode_str(label) {
-                            Some(encoded) => {
-                                if use_prefix {
-                                    format!("xn--{}", encoded)
-                                } else {
-                                    encoded
-                                }
-                            }
-                            None => label.to_string(),
-                        }
-                    }
-                })
-                .collect();
-            result_lines.push(labels.join("."));
-        } else if line.contains(' ') {
-            let words: Vec<String> = line
-                .split(' ')
-                .map(|word| {
-                    if word.is_ascii() {
-                        word.to_string()
-                    } else {
-                        match punycode::encode_str(word) {
-                            Some(encoded) => {
-                                if use_prefix {
-                                    format!("xn--{}", encoded)
-                                } else {
-                                    encoded
-                                }
-                            }
-                            None => word.to_string(),
-                        }
-                    }
-                })
-                .collect();
-            result_lines.push(words.join(" "));
-        } else if line.is_ascii() {
-            result_lines.push(line.to_string());
+/// Mode IDN : chaque mot non ASCII est traité comme un nom de domaine (UTS #46 :
+/// minuscules, normalisation, préfixe `xn--`). Mode brut : chaque mot est encodé
+/// tel quel selon la RFC 3492, sans préfixe.
+fn punycode_encode(input: &str, idn: bool) -> Result<String, String> {
+    map_words(input, |word| {
+        if !idn {
+            punycode::encode_str(word)
+                .ok_or_else(|| format!("Impossible d'encoder « {word} » en Punycode."))
+        } else if word.is_ascii() {
+            Ok(word.to_string())
         } else {
-            match punycode::encode_str(line) {
-                Some(encoded) => {
-                    if use_prefix {
-                        result_lines.push(format!("xn--{}", encoded));
-                    } else {
-                        result_lines.push(encoded);
-                    }
-                }
-                None => result_lines.push(line.to_string()),
-            }
+            idna::domain_to_ascii(word).map_err(|_| {
+                format!("« {word} » n'est pas un nom de domaine internationalisé valide.")
+            })
         }
-    }
-
-    result_lines.join("\n")
+    })
 }
 
-fn punycode_decode(input: &str) -> Result<String, String> {
-    let mut result_lines = Vec::new();
-
-    for line in input.lines() {
-        if line.contains('.') {
-            let mut labels = Vec::new();
-            for label in line.split('.') {
-                let clean = label.trim();
-                if clean.to_ascii_lowercase().starts_with("xn--") {
-                    let raw = &clean[4..];
-                    let decoded = punycode::decode_to_string(raw)
-                        .ok_or_else(|| format!("Punycode invalide dans le label: '{}'", clean))?;
-                    labels.push(decoded);
-                } else if let Some(decoded) = punycode::decode_to_string(clean) {
-                    labels.push(decoded);
-                } else {
-                    labels.push(clean.to_string());
-                }
-            }
-            result_lines.push(labels.join("."));
-        } else if line.contains(' ') {
-            let mut words = Vec::new();
-            for word in line.split(' ') {
-                let clean = word.trim();
-                if clean.to_ascii_lowercase().starts_with("xn--") {
-                    let raw = &clean[4..];
-                    let decoded = punycode::decode_to_string(raw)
-                        .ok_or_else(|| format!("Punycode invalide: '{}'", clean))?;
-                    words.push(decoded);
-                } else if let Some(decoded) = punycode::decode_to_string(clean) {
-                    words.push(decoded);
-                } else {
-                    words.push(clean.to_string());
-                }
-            }
-            result_lines.push(words.join(" "));
-        } else {
-            let clean = line.trim();
-            if clean.to_ascii_lowercase().starts_with("xn--") {
-                let raw = &clean[4..];
-                let decoded = punycode::decode_to_string(raw)
-                    .ok_or_else(|| format!("Punycode invalide: '{}'", clean))?;
-                result_lines.push(decoded);
-            } else if let Some(decoded) = punycode::decode_to_string(clean) {
-                result_lines.push(decoded);
-            } else {
-                return Err(format!(
-                    "Impossible de décoder la séquence Punycode: '{}'",
-                    clean
-                ));
-            }
+/// Mode IDN : seuls les labels qui commencent par `xn--` sont décodés, le reste du
+/// texte est conservé tel quel. Mode brut : chaque mot est décodé selon la RFC 3492.
+fn punycode_decode(input: &str, idn: bool) -> Result<String, String> {
+    map_words(input, |word| {
+        if !idn {
+            return punycode::decode_to_string(word)
+                .ok_or_else(|| format!("Punycode invalide : « {word} »."));
         }
-    }
-
-    Ok(result_lines.join("\n"))
+        let labels = word
+            .split('.')
+            .map(|label| match label.get(..4) {
+                // Les noms de domaine ignorent la casse : « XN--MNCHEN-3YA » donne « münchen ».
+                Some(prefix) if prefix.eq_ignore_ascii_case("xn--") => {
+                    punycode::decode_to_string(&label[4..].to_ascii_lowercase())
+                        .ok_or_else(|| format!("Label Punycode invalide : « {label} »."))
+                }
+                _ => Ok(label.to_string()),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(labels.join("."))
+    })
 }
 
 // ==========================================

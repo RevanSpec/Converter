@@ -17,7 +17,8 @@ L'application permet la conversion bidirectionnelle instantanée entre du texte 
   - Bouton interactif d'inversion des sens avec animation fluide de rotation.
 - **🔒 Zéro Historique & Confidentialité Totale** :
   - Traitement purement en mémoire vive (RAM).
-  - Aucun stockage local (`localStorage`, cookies, fichiers logs ou bases de données proscrits).
+  - Aucun stockage local (`localStorage`, cookies, fichiers logs ou bases de données proscrits) ; webview en navigation privée.
+  - Aucune requête réseau : polices embarquées, CSP stricte, contrôle automatique du build en CI.
   - Bouton « Vider » pour purger instantanément les deux volets.
 - **🎨 Design Glassmorphism Luxueux** :
   - Arrière-plan sombre avec halos d'ambiance dynamiques.
@@ -36,18 +37,18 @@ L'application permet la conversion bidirectionnelle instantanée entre du texte 
 
 | Format | Description & Options |
 | :--- | :--- |
-| **Hexadécimal** | Séparateurs configurables (espace, continu, préfixe `0x`, deux-points), majuscules/minuscules |
+| **Hexadécimal** | Séparateurs configurables (espace, continu, préfixe `0x`, deux-points), majuscules/minuscules ; au décodage, accepte aussi `\x`, `%`, `-`, `,` et `;` |
 | **Binaire** | Groupes d'octets de 8 bits ou séquence continue |
-| **Base64** | Standard RFC 4648 ou URL-Safe (`-_`) |
-| **Base32** | Alphabet RFC 4648 avec gestion du padding |
-| **Code Morse** | Standard international ITU-R avec lecteur audio intégré |
+| **Base64** | Standard RFC 4648 ou URL-Safe (`-_`) ; au décodage, `=` final facultatif et alphabet détecté automatiquement |
+| **Base32** | Alphabet RFC 4648 avec gestion du padding ; texte tronqué signalé |
+| **Code Morse** | Standard international ITU-R (dont `É`), lignes conservées, caractères sans code refusés, translittérés (`à` → `A`) ou ignorés, lecteur audio intégré |
 | **URL Encode** | Percent-encoding conforme URI |
-| **HTML Entities** | Échappement et déséchappement des entités nommées et numériques |
+| **HTML Entities** | Échappement, et déséchappement de toutes les entités nommées HTML5 et des entités numériques |
 | **ROT13 / César** | Décalage alphabétique configurable de 1 à 25 (curseur dynamique) |
 | **ASCII Décimal** | Séquences de valeurs d'octets numériques base 10 |
 | **ASCII Octal** | Séquences d'octets en base 8 |
-| **Inversion** | Inversion pure de chaîne |
-| **Punycode (IDN)** | Standard RFC 3492 pour noms de domaine internationalisés (option préfixe `xn--` ou brut) |
+| **Inversion** | Inversion par graphèmes : emojis composés et accents restent intacts |
+| **Punycode (IDN)** | Noms de domaine internationalisés (UTS #46, préfixe `xn--`) ou Punycode brut RFC 3492 |
 
 ---
 
@@ -70,13 +71,14 @@ Cette commande démarre le serveur de développement Vite et lance la fenêtre d
 
 ## 🧪 Tests et Vérifications
 
-Le moteur de conversion est couvert par trois familles de tests :
+Le moteur de conversion est couvert par quatre familles de tests :
 
 - des tests unitaires d'aller-retour et d'erreurs par format (`src-tauri/src/converters.rs`) ;
 - les vecteurs officiels de la RFC 4648 pour Base16, Base32 et Base64 (`src-tauri/tests/rfc4648.rs`) ;
-- des tests de propriété `proptest` : décoder(encoder(x)) redonne x, sur 256 textes aléatoires par propriété à chaque exécution (`src-tauri/tests/roundtrip_props.rs`).
+- des tests de propriété `proptest` : décoder(encoder(x)) redonne x pour chaque format, sur 256 textes aléatoires par propriété à chaque exécution (`src-tauri/tests/roundtrip_props.rs`) ;
+- un test de non-régression par bug corrigé (`src-tauri/tests/regressions.rs`).
 
-Deux propriétés sont marquées `#[ignore]` : elles décrivent des bugs connus (décodage Punycode, blancs supprimés au décodage), corrigés en phase 1 de la [feuille de route](ROADMAP.md). `cargo test -- --ignored` les exécute.
+L'interface a ses tests Vitest (`src/*.test.ts`) : calendrier des bips Morse, réponses périmées, tailles de texte.
 
 La CI GitHub Actions lance les mêmes vérifications à chaque push sur `main` et sur chaque pull request. En local :
 
@@ -89,7 +91,9 @@ cargo test --locked
 
 ```bash
 npm ci
+npm test
 npm run build
+npm run check:offline
 ```
 
 ---
