@@ -1,0 +1,23 @@
+[package]
+name = "converter-core"
+description = "Moteur de conversion de Glass Converter : codecs sur des octets, sans dépendance à Tauri"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+
+[dependencies]
+base64 = "0.22"
+hex = "0.4"
+htmlize = { version = "1.1.0", features = ["unescape"] }
+idna = "1.1.0"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+unicode-segmentation = "1.13.3"
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"
+# Types TypeScript de l'interface, générés par `cargo test` dans src/bindings/.
+ts-rs = "12"
