@@ -78,13 +78,13 @@ Une phase n'est terminée que si ces cinq règles tiennent.
 
 En 1 à 2 jours, la CI et des tests de référence permettent de tout modifier ensuite sans casser l'existant. Pas de version publiée : elle prépare la v0.2.
 
-- [ ] A21 · CI GitHub Actions (Windows et Ubuntu) : format, clippy, tests Rust, `npm ci`, `tsc`, `vite build`.
-- [ ] A20 · Vecteurs officiels RFC 4648 pour Base16, Base32 et Base64.
-- [ ] A20 · Test de propriété (`proptest`) : décoder(encoder(x)) = x pour chaque format réversible. Punycode, Inversion, César, HTML et Morse, connus comme faux, sont exclus jusqu'à la phase 1.
-- [ ] A22 · Corriger les 6 avertissements clippy (`FromStr`, `is_multiple_of`, `rem_euclid`, `replace` enchaînés).
-- [ ] A22 · Nettoyer les restes du modèle : nom `glass-converter` dans `package.json`, `authors` dans `Cargo.toml`, `src/assets/*.svg` inutilisés.
-- [ ] A22 · Ajouter une LICENSE et une source unique pour le numéro de version.
-- [ ] Rendre le README vérifiable : retirer « suite complète de tests » tant que ce n'est pas vrai.
+- [x] A21 · CI GitHub Actions (Windows et Ubuntu) : format, clippy, tests Rust, `npm ci`, `tsc`, `vite build`.
+- [x] A20 · Vecteurs officiels RFC 4648 pour Base16, Base32 et Base64.
+- [x] A20 · Test de propriété (`proptest`) : décoder(encoder(x)) = x pour chaque format réversible. Punycode, Inversion, César, HTML et Morse, connus comme faux, sont exclus jusqu'à la phase 1.
+- [x] A22 · Corriger les 6 avertissements clippy (`FromStr`, `is_multiple_of`, `rem_euclid`, `replace` enchaînés).
+- [x] A22 · Nettoyer les restes du modèle : nom `glass-converter` dans `package.json`, `authors` dans `Cargo.toml`, `src/assets/*.svg` inutilisés.
+- [x] A22 · Ajouter une LICENSE et une source unique pour le numéro de version.
+- [x] Rendre le README vérifiable : retirer « suite complète de tests » tant que ce n'est pas vrai.
 
 **Sortie :** la CI est verte sur `main` et bloque toute PR en échec.
 

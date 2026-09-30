@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
-use serde::{Deserialize, Serialize};
 use idna::punycode;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,8 +20,10 @@ pub enum ConverterFormat {
     Punycode,
 }
 
-impl ConverterFormat {
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl FromStr for ConverterFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "hex" | "hexadecimal" => Ok(Self::Hex),
             "binary" | "binaire" | "bin" => Ok(Self::Binary),
@@ -82,7 +85,11 @@ pub fn convert(
 // ==========================================
 // ENCODE
 // ==========================================
-pub fn encode(input: &str, format: ConverterFormat, options: &ConvertOptions) -> Result<String, String> {
+pub fn encode(
+    input: &str,
+    format: ConverterFormat,
+    options: &ConvertOptions,
+) -> Result<String, String> {
     if input.is_empty() {
         return Ok(String::new());
     }
@@ -144,33 +151,27 @@ pub fn encode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
                 Ok(general_purpose::STANDARD.encode(input.as_bytes()))
             }
         }
-        ConverterFormat::Base32 => {
-            Ok(base32_encode(input.as_bytes()))
-        }
-        ConverterFormat::Morse => {
-            Ok(text_to_morse(input))
-        }
+        ConverterFormat::Base32 => Ok(base32_encode(input.as_bytes())),
+        ConverterFormat::Morse => Ok(text_to_morse(input)),
         ConverterFormat::AsciiDec => {
             let parts: Vec<String> = input.as_bytes().iter().map(|b| b.to_string()).collect();
             Ok(parts.join(" "))
         }
         ConverterFormat::AsciiOct => {
-            let parts: Vec<String> = input.as_bytes().iter().map(|b| format!("{:03o}", b)).collect();
+            let parts: Vec<String> = input
+                .as_bytes()
+                .iter()
+                .map(|b| format!("{:03o}", b))
+                .collect();
             Ok(parts.join(" "))
         }
-        ConverterFormat::Url => {
-            Ok(url_encode(input))
-        }
-        ConverterFormat::Html => {
-            Ok(html_escape(input))
-        }
+        ConverterFormat::Url => Ok(url_encode(input)),
+        ConverterFormat::Html => Ok(html_escape(input)),
         ConverterFormat::Caesar => {
             let shift = options.caesar_shift.unwrap_or(13);
             Ok(caesar_shift(input, shift))
         }
-        ConverterFormat::Reverse => {
-            Ok(input.chars().rev().collect())
-        }
+        ConverterFormat::Reverse => Ok(input.chars().rev().collect()),
         ConverterFormat::Punycode => {
             let use_prefix = options.punycode_prefix.unwrap_or(true);
             Ok(punycode_encode(input, use_prefix))
@@ -181,7 +182,11 @@ pub fn encode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
 // ==========================================
 // DECODE
 // ==========================================
-pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) -> Result<String, String> {
+pub fn decode(
+    input: &str,
+    format: ConverterFormat,
+    options: &ConvertOptions,
+) -> Result<String, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Ok(String::new());
@@ -193,14 +198,9 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
             let cleaned = trimmed
                 .replace("0x", "")
                 .replace("0X", "")
-                .replace(' ', "")
-                .replace(':', "")
-                .replace(',', "")
-                .replace('\n', "")
-                .replace('\r', "")
-                .replace('\t', "");
+                .replace([' ', ':', ',', '\n', '\r', '\t'], "");
 
-            if cleaned.len() % 2 != 0 {
+            if !cleaned.len().is_multiple_of(2) {
                 return Err(format!(
                     "Longueur hexadécimale impaire ({} caractères). Chaque octet nécessite 2 caractères hexadécimaux.",
                     cleaned.len()
@@ -209,7 +209,10 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
 
             let bytes = hex::decode(&cleaned).map_err(|e| match e {
                 hex::FromHexError::InvalidHexCharacter { c, index } => {
-                    format!("Caractère hexadécimal invalide '{}' à la position {}.", c, index)
+                    format!(
+                        "Caractère hexadécimal invalide '{}' à la position {}.",
+                        c, index
+                    )
                 }
                 hex::FromHexError::OddLength => "Longueur hexadécimale impaire.".to_string(),
                 _ => format!("Erreur de décodage hexadécimal: {}", e),
@@ -241,7 +244,7 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
                 }
             }
 
-            if cleaned.len() % 8 != 0 {
+            if !cleaned.len().is_multiple_of(8) {
                 return Err(format!(
                     "Longueur binaire invalide ({} bits). Elle doit être un multiple de 8 bits.",
                     cleaned.len()
@@ -251,7 +254,8 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
             let mut bytes = Vec::with_capacity(cleaned.len() / 8);
             for chunk in cleaned.as_bytes().chunks(8) {
                 let s = std::str::from_utf8(chunk).unwrap();
-                let byte = u8::from_str_radix(s, 2).map_err(|_| "Erreur de conversion binaire".to_string())?;
+                let byte = u8::from_str_radix(s, 2)
+                    .map_err(|_| "Erreur de conversion binaire".to_string())?;
                 bytes.push(byte);
             }
 
@@ -267,13 +271,13 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
             let url_safe = options.base64_url_safe.unwrap_or(false);
 
             let bytes = if url_safe {
-                general_purpose::URL_SAFE.decode(&cleaned).or_else(|_| {
-                    general_purpose::STANDARD.decode(&cleaned)
-                })
+                general_purpose::URL_SAFE
+                    .decode(&cleaned)
+                    .or_else(|_| general_purpose::STANDARD.decode(&cleaned))
             } else {
-                general_purpose::STANDARD.decode(&cleaned).or_else(|_| {
-                    general_purpose::URL_SAFE.decode(&cleaned)
-                })
+                general_purpose::STANDARD
+                    .decode(&cleaned)
+                    .or_else(|_| general_purpose::URL_SAFE.decode(&cleaned))
             }
             .map_err(|e| format!("Chaîne Base64 invalide: {}", e))?;
 
@@ -293,15 +297,17 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
                 )
             })
         }
-        ConverterFormat::Morse => {
-            morse_to_text(trimmed)
-        }
+        ConverterFormat::Morse => morse_to_text(trimmed),
         ConverterFormat::AsciiDec => {
             let tokens = trimmed.split(|c: char| c.is_whitespace() || c == ',' || c == ';');
             let mut bytes = Vec::new();
             for (i, token) in tokens.filter(|t| !t.is_empty()).enumerate() {
                 let val: u8 = token.parse().map_err(|_| {
-                    format!("Valeur décimale invalide '{}' à l'élément {} (doit être entre 0 et 255).", token, i + 1)
+                    format!(
+                        "Valeur décimale invalide '{}' à l'élément {} (doit être entre 0 et 255).",
+                        token,
+                        i + 1
+                    )
                 })?;
                 bytes.push(val);
             }
@@ -317,7 +323,11 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
             let mut bytes = Vec::new();
             for (i, token) in tokens.filter(|t| !t.is_empty()).enumerate() {
                 let val = u8::from_str_radix(token, 8).map_err(|_| {
-                    format!("Valeur octale invalide '{}' à l'élément {} (doit être en base 8, 0-377).", token, i + 1)
+                    format!(
+                        "Valeur octale invalide '{}' à l'élément {} (doit être en base 8, 0-377).",
+                        token,
+                        i + 1
+                    )
                 })?;
                 bytes.push(val);
             }
@@ -328,22 +338,14 @@ pub fn decode(input: &str, format: ConverterFormat, options: &ConvertOptions) ->
                 )
             })
         }
-        ConverterFormat::Url => {
-            url_decode(trimmed)
-        }
-        ConverterFormat::Html => {
-            html_unescape(trimmed)
-        }
+        ConverterFormat::Url => url_decode(trimmed),
+        ConverterFormat::Html => html_unescape(trimmed),
         ConverterFormat::Caesar => {
             let shift = options.caesar_shift.unwrap_or(13);
             Ok(caesar_shift(trimmed, -shift))
         }
-        ConverterFormat::Reverse => {
-            Ok(trimmed.chars().rev().collect())
-        }
-        ConverterFormat::Punycode => {
-            punycode_decode(trimmed)
-        }
+        ConverterFormat::Reverse => Ok(trimmed.chars().rev().collect()),
+        ConverterFormat::Punycode => punycode_decode(trimmed),
     }
 }
 
@@ -373,7 +375,7 @@ fn base32_encode(data: &[u8]) -> String {
     }
 
     // Padding RFC 4648
-    while result.len() % 8 != 0 {
+    while !result.len().is_multiple_of(8) {
         result.push('=');
     }
 
@@ -394,7 +396,12 @@ fn base32_decode(input: &str) -> Result<Vec<u8>, String> {
         let val = match upper {
             'A'..='Z' => (upper as u8 - b'A') as u64,
             '2'..='7' => (upper as u8 - b'2' + 26) as u64,
-            _ => return Err(format!("Caractère Base32 invalide '{}' à la position {}.", ch, pos)),
+            _ => {
+                return Err(format!(
+                    "Caractère Base32 invalide '{}' à la position {}.",
+                    ch, pos
+                ))
+            }
         };
 
         buffer = (buffer << 5) | val;
@@ -575,7 +582,7 @@ fn morse_to_text(morse: &str) -> Result<String, String> {
 // CAESAR / ROT13
 // ==========================================
 fn caesar_shift(text: &str, shift: i32) -> String {
-    let s = ((shift % 26) + 26) % 26;
+    let s = shift.rem_euclid(26);
     text.chars()
         .map(|c| {
             if c.is_ascii_lowercase() {
@@ -685,11 +692,11 @@ fn html_unescape(text: &str) -> Result<String, String> {
                     "reg" => Some('®'),
                     "euro" => Some('€'),
                     s if s.starts_with("#x") || s.starts_with("#X") => {
-                        u32::from_str_radix(&s[2..], 16).ok().and_then(char::from_u32)
+                        u32::from_str_radix(&s[2..], 16)
+                            .ok()
+                            .and_then(char::from_u32)
                     }
-                    s if s.starts_with('#') => {
-                        s[1..].parse::<u32>().ok().and_then(char::from_u32)
-                    }
+                    s if s.starts_with('#') => s[1..].parse::<u32>().ok().and_then(char::from_u32),
                     _ => None,
                 } {
                     res.push(ch);
@@ -819,7 +826,10 @@ fn punycode_decode(input: &str) -> Result<String, String> {
             } else if let Some(decoded) = punycode::decode_to_string(clean) {
                 result_lines.push(decoded);
             } else {
-                return Err(format!("Impossible de décoder la séquence Punycode: '{}'", clean));
+                return Err(format!(
+                    "Impossible de décoder la séquence Punycode: '{}'",
+                    clean
+                ));
             }
         }
     }
@@ -881,7 +891,10 @@ mod tests {
 
     #[test]
     fn test_rot13_roundtrip() {
-        let opts = ConvertOptions { caesar_shift: Some(13), ..Default::default() };
+        let opts = ConvertOptions {
+            caesar_shift: Some(13),
+            ..Default::default()
+        };
         let original = "Attack at Dawn!";
         let encoded = encode(original, ConverterFormat::Caesar, &opts).unwrap();
         let decoded = decode(&encoded, ConverterFormat::Caesar, &opts).unwrap();

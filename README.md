@@ -1,5 +1,7 @@
 # 🔮 Glass Converter — Encodeur & Décodeur Universel
 
+[![CI](https://github.com/RevanSpec/Converter/actions/workflows/ci.yml/badge.svg)](https://github.com/RevanSpec/Converter/actions/workflows/ci.yml)
+
 Application de bureau moderne, ultra-rapide et épurée conçue en **Rust** et **Tauri v2**, avec une interface à effet **Glassmorphism** (*verre dépoli, reflets lumineux et typographie soignée*).
 
 L'application permet la conversion bidirectionnelle instantanée entre du texte en clair et de multiples formats d'encodage et de chiffrement, avec une garantie absolue de **Zéro Historique** (traitement 100% en mémoire volatile).
@@ -66,13 +68,28 @@ Cette commande démarre le serveur de développement Vite et lance la fenêtre d
 
 ---
 
-## 🧪 Tests Unitaires Rust
+## 🧪 Tests et Vérifications
 
-Le moteur de conversion dispose d'une suite complète de tests unitaires couvrant l'encodage, le décodage et la validation des erreurs :
+Le moteur de conversion est couvert par trois familles de tests :
+
+- des tests unitaires d'aller-retour et d'erreurs par format (`src-tauri/src/converters.rs`) ;
+- les vecteurs officiels de la RFC 4648 pour Base16, Base32 et Base64 (`src-tauri/tests/rfc4648.rs`) ;
+- des tests de propriété `proptest` : décoder(encoder(x)) redonne x, sur 256 textes aléatoires par propriété à chaque exécution (`src-tauri/tests/roundtrip_props.rs`).
+
+Deux propriétés sont marquées `#[ignore]` : elles décrivent des bugs connus (décodage Punycode, blancs supprimés au décodage), corrigés en phase 1 de la [feuille de route](ROADMAP.md). `cargo test -- --ignored` les exécute.
+
+La CI GitHub Actions lance les mêmes vérifications à chaque push sur `main` et sur chaque pull request. En local :
 
 ```bash
 cd src-tauri
-cargo test
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```
+
+```bash
+npm ci
+npm run build
 ```
 
 ---
@@ -87,3 +104,22 @@ npm run tauri build
 
 L'exécutable autonome sera généré dans :
 `src-tauri/target/release/glass-converter.exe`
+
+Le numéro de version se modifie uniquement dans `src-tauri/Cargo.toml` : Tauri le reprend automatiquement.
+
+---
+
+## 🗺️ Feuille de Route
+
+Les prochaines étapes (correctifs, moteur en octets, conversion multi-couche, nouveaux formats) sont détaillées dans [ROADMAP.md](ROADMAP.md).
+
+---
+
+## 📄 Licence
+
+Glass Converter est distribué, au choix, sous l'une de ces deux licences :
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- Licence MIT ([LICENSE-MIT](LICENSE-MIT))
+
+Sauf mention contraire explicite, toute contribution soumise pour inclusion dans ce projet, au sens de la licence Apache-2.0, est distribuée sous cette double licence, sans condition supplémentaire.
