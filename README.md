@@ -15,9 +15,14 @@ L'application permet la conversion bidirectionnelle instantanée entre du texte 
   - Sens 1 : *Texte en clair* $\rightarrow$ *Format encodé*
   - Sens 2 : *Format encodé* $\rightarrow$ *Texte en clair*
   - Bouton interactif d'inversion des sens avec animation fluide de rotation.
+- **⛓️ Conversion Multi-couche (mode Chaîne)** :
+  - Plusieurs formats enchaînés, par exemple Base64 puis gzip ; chaque couche a son sens, ses options, et peut être désactivée ou déplacée (poignée ou `Alt+↑/↓`).
+  - Sous chaque couche : un aperçu de sa sortie, sa taille, texte ou octets, et sa durée ; la couche en erreur est mise en évidence.
+  - « Inverser » retourne la chaîne (ordre et sens) : la sortie redevient l'entrée.
+  - Recettes prêtes à l'emploi, « Mes recettes », et forme courte à copier-coller (voir la section « Chaînes et recettes » ci-dessous).
 - **🔒 Zéro Historique & Confidentialité Totale** :
-  - Traitement purement en mémoire vive (RAM).
-  - Aucun stockage local (`localStorage`, cookies, fichiers logs ou bases de données proscrits) ; webview en navigation privée.
+  - Traitement purement en mémoire vive (RAM) : aucun texte saisi ni résultat n'est jamais écrit sur disque.
+  - Aucun stockage local (`localStorage`, cookies, fichiers logs ou bases de données proscrits) ; webview en navigation privée. Seules les recettes que vous enregistrez vous-même sont conservées, sans texte ni option secrète.
   - Aucune requête réseau : polices embarquées, CSP stricte, contrôle automatique du build en CI.
   - Bouton « Vider » pour purger instantanément les deux volets.
 - **🎨 Design Glassmorphism Luxueux** :
@@ -49,15 +54,49 @@ L'application permet la conversion bidirectionnelle instantanée entre du texte 
 | **Octets (octal)** | Valeur de chaque octet UTF-8 en base 8, de 000 à 377 |
 | **Inversion** | Inversion par graphèmes : emojis composés et accents restent intacts |
 | **Punycode (IDN)** | Noms de domaine internationalisés (UTS #46, préfixe `xn--`) ou Punycode brut RFC 3492 |
+| **Data URI** | RFC 2397 : `data:<type MIME>;base64,…` ou encodage-pourcent ; au décodage, tout type MIME est accepté |
+| **gzip, zlib, Deflate, Brotli** | Compression et décompression (mode Chaîne), niveau réglable ; plusieurs membres gzip à la suite acceptés |
 
-Un décodage qui ne produit pas du texte UTF-8 (une image en Base64, par exemple) affiche ses octets en hexadécimal. Chaque erreur indique sa position, et la zone fautive est surlignée dans le texte saisi.
+Un décodage qui ne produit pas du texte UTF-8 (une image en Base64, par exemple) affiche ses octets en hexdump (décalage, hexadécimal, ASCII), copiable en hexadécimal ou en Base64. Chaque erreur indique sa position, et la zone fautive est surlignée dans le texte saisi.
+
+Aucune sortie ne dépasse 100 Mo, par conversion comme par couche : une « bombe » de décompression (quelques kilo-octets qui se déploieraient en gigaoctets) s'arrête avec une erreur au lieu de saturer la mémoire.
+
+---
+
+## ⛓️ Chaînes et recettes
+
+En mode **Chaîne**, la sortie de chaque couche est l'entrée de la suivante. La conversion s'arrête à la première erreur, dont le message nomme la couche : « Couche 2 (Hexadécimal, décodage) : … ».
+
+Une chaîne se partage sous sa **forme courte**, affichée au-dessus de l'éditeur : « Copier » la met dans le presse-papier, et une recette collée dans ce champ remplace la chaîne (Entrée ou « Importer »).
+
+```text
+base64:dec|hex:dec
+url:dec|base64:dec|deflate:dec
+!caesar:enc(shift=3)|hex:enc(separator=%3A,uppercase=true)
+```
+
+- chaque couche s'écrit `format:sens`, avec `enc` ou `dec` ; les alias sont acceptés (`b64` pour `base64`) ;
+- `!` devant une couche la désactive ;
+- les options suivent entre parenthèses ; les valeurs de texte sont encodées en pourcent (`%3A` pour `:`) ;
+- seules les options différentes de leur valeur par défaut sont écrites, et jamais une option secrète.
+
+Recettes prêtes à l'emploi, dans le sens du décodage (« Inverser » donne l'encodage) :
+
+| Recette | Forme courte | Usage |
+| :--- | :--- | :--- |
+| Base64 double | `base64:dec\|base64:dec` | Texte encodé deux fois |
+| Data URI | `data_uri:dec` | Données d'un `data:…` |
+| gzip + Base64 | `base64:dec\|gzip:dec` | Contenu compressé puis encodé |
+| SAML | `url:dec\|base64:dec\|deflate:dec` | Paramètre `SAMLRequest` de la liaison HTTP-Redirect |
+
+**Mes recettes** garde vos chaînes sous un nom, dans `recipes.json` du dossier de configuration de l'application (`%APPDATA%\com.converter.glass\` sous Windows). Ce fichier n'est écrit que lorsque vous enregistrez ou supprimez une recette, et ne contient que les formats, les sens et les options non secrètes : jamais le texte saisi. Chaque recette y est stockée sous sa forme JSON versionnée, `{"v":1,"steps":[…]}`.
 
 ---
 
 ## 🧱 Architecture
 
-- `crates/converter-core` : le moteur, en Rust et sans Tauri. Chaque format implémente le trait `Codec` sur des octets et décrit ses options ; le registre les rassemble.
-- `src-tauri` : l'application, qui expose les commandes `list_codecs` et `convert`.
+- `crates/converter-core` : le moteur, en Rust et sans Tauri. Chaque format implémente le trait `Codec` sur des octets et décrit ses options ; le registre les rassemble. Les chaînes (`pipeline.rs`) et les recettes (`recipe.rs`) s'appuient sur ce registre.
+- `src-tauri` : l'application, qui expose les commandes `list_codecs`, `convert`, `run_pipeline`, `invert_chain`, `recipe_to_short`, `recipe_from_short`, `list_presets` et celles de « Mes recettes ».
 - `src` : l'interface Svelte 5, construite à partir de `list_codecs`. Ses types (`src/bindings`) sont générés depuis Rust par `ts-rs` à chaque `cargo test`.
 
 Ajouter un format : un fichier dans `crates/converter-core/src/codecs/`, avec ses tests, puis une ligne dans `codecs::all`. L'interface l'affiche sans autre modification.
@@ -87,10 +126,12 @@ Le moteur de conversion est couvert par quatre familles de tests :
 
 - des tests unitaires dans le fichier de chaque format (`crates/converter-core/src/codecs/`) ;
 - les vecteurs officiels de la RFC 4648 pour Base16, Base32 et Base64 (`crates/converter-core/tests/rfc4648.rs`) ;
-- des tests de propriété `proptest` : décoder(encoder(x)) redonne x pour chaque format, y compris sur des octets quelconques, avec 256 cas aléatoires par propriété à chaque exécution (`crates/converter-core/tests/roundtrip_props.rs`) ;
+- des tests de propriété `proptest` : décoder(encoder(x)) redonne x pour chaque format, y compris sur des octets quelconques, avec 256 cas aléatoires par propriété à chaque exécution (`crates/converter-core/tests/roundtrip_props.rs`) ; toute chaîne réversible de 1 à 4 couches suivie de son inverse redonne l'entrée, et une recette se relit à l'identique sous ses deux formes (`crates/converter-core/tests/pipeline_props.rs`) ;
 - un test de non-régression par bug corrigé (`crates/converter-core/tests/regressions.rs`).
 
-L'interface a ses tests Vitest (`src/lib/*.test.ts`) : calendrier des bips Morse, réponses périmées, tailles de texte, options par défaut, positions des erreurs.
+L'application teste le fichier « Mes recettes » (`src-tauri/src/recipes.rs`) : rien n'est écrit avant un enregistrement, et un fichier illisible est mis de côté plutôt qu'écrasé.
+
+L'interface a ses tests Vitest (`src/lib/*.test.ts`) : calendrier des bips Morse, réponses périmées, tailles de texte, options par défaut, positions des erreurs, couches de la chaîne, recherche de formats, hexdump.
 
 La CI GitHub Actions lance les mêmes vérifications à chaque push sur `main` et sur chaque pull request. En local :
 
@@ -126,7 +167,7 @@ Le numéro de version se modifie uniquement dans le `Cargo.toml` racine (`[works
 
 ## 🗺️ Feuille de Route
 
-Les prochaines étapes (correctifs, moteur en octets, conversion multi-couche, nouveaux formats) sont détaillées dans [ROADMAP.md](ROADMAP.md).
+Les prochaines étapes (fichiers, nouveaux formats, détection automatique, chiffrement) sont détaillées dans [ROADMAP.md](ROADMAP.md).
 
 ---
 
