@@ -64,6 +64,22 @@ fn byte_formats() -> impl Strategy<Value = (&'static str, Options)> {
                     .with("mode", mode)
                     .with("plus_space", plus_space)
             )),
+        (
+            prop::sample::select(vec!["text/plain;charset=utf-8", "application/octet-stream"]),
+            prop::sample::select(vec!["base64", "percent"])
+        )
+            .prop_map(|(media_type, encoding)| (
+                "data_uri",
+                Options::new()
+                    .with("media_type", media_type)
+                    .with("encoding", encoding)
+            )),
+        (
+            prop::sample::select(vec!["gzip", "zlib", "deflate"]),
+            0..=9i32
+        )
+            .prop_map(|(codec, level)| (codec, Options::new().with("level", level))),
+        (0..=11i32).prop_map(|level| ("brotli", Options::new().with("level", level))),
     ]
 }
 

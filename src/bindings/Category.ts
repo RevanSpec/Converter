@@ -3,4 +3,4 @@
 /**
  * Famille de formats, pour regrouper les onglets.
  */
-export type Category = "bytes" | "web" | "text" | "cipher";
+export type Category = "bytes" | "web" | "text" | "cipher" | "compression";

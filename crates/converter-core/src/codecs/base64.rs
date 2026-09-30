@@ -72,32 +72,43 @@ impl Codec for Base64 {
 
     /// Avec ou sans padding ; l'alphabet est déduit des caractères présents.
     fn decode(&self, input: &[u8], options: &Options) -> Result<Vec<u8>, CodecError> {
-        let (chars, positions) = strip_whitespace(as_text(input)?);
-        let cleaned: String = chars.iter().collect();
-        let url_safe = cleaned.contains(['-', '_']);
-        let standard = cleaned.contains(['+', '/']);
-        if url_safe && standard {
-            return Err(CodecError::new(
-                ErrorCode::MixedAlphabets,
-                "Base64 invalide : le texte mélange l'alphabet standard (+ /) et l'alphabet URL-safe (- _).",
-            ));
-        }
-
         let prefer_url_safe = options.choice(&ALPHABET)? == "url_safe";
-        let engine = if url_safe || (prefer_url_safe && !standard) {
-            &LENIENT_URL_SAFE
-        } else {
-            &LENIENT_STANDARD
-        };
+        decode_base64(as_text(input)?, 0, prefer_url_safe)
+    }
+}
 
-        // Caractère à l'octet `offset` du texte nettoyé, et son index dans le texte saisi.
-        let locate = |offset: usize| {
-            let index = cleaned.get(..offset).map_or(0, |s| s.chars().count());
-            let c = chars.get(index).copied().unwrap_or('?');
-            (c, positions.get(index).copied().unwrap_or(index))
-        };
+/// Décode `text`, dont le premier caractère est à l'index `first` du texte saisi : les
+/// positions des erreurs portent sur ce texte saisi (un Data URI, par exemple).
+pub(crate) fn decode_base64(
+    text: &str,
+    first: usize,
+    prefer_url_safe: bool,
+) -> Result<Vec<u8>, CodecError> {
+    let (chars, positions) = strip_whitespace(text);
+    let cleaned: String = chars.iter().collect();
+    let url_safe = cleaned.contains(['-', '_']);
+    let standard = cleaned.contains(['+', '/']);
+    if url_safe && standard {
+        return Err(CodecError::new(
+            ErrorCode::MixedAlphabets,
+            "Base64 invalide : le texte mélange l'alphabet standard (+ /) et l'alphabet URL-safe (- _).",
+        ));
+    }
 
-        engine.decode(&cleaned).map_err(|error| match error {
+    let engine = if url_safe || (prefer_url_safe && !standard) {
+        &LENIENT_URL_SAFE
+    } else {
+        &LENIENT_STANDARD
+    };
+
+    // Caractère à l'octet `offset` du texte nettoyé, et son index dans le texte saisi.
+    let locate = |offset: usize| {
+        let index = cleaned.get(..offset).map_or(0, |s| s.chars().count());
+        let c = chars.get(index).copied().unwrap_or('?');
+        (c, first + positions.get(index).copied().unwrap_or(index))
+    };
+
+    engine.decode(&cleaned).map_err(|error| match error {
             DecodeError::InvalidByte(offset, _) => {
                 let (c, index) = locate(offset);
                 CodecError::at(
@@ -128,7 +139,6 @@ impl Codec for Base64 {
                 "Padding Base64 invalide : les « = » doivent terminer le texte.",
             ),
         })
-    }
 }
 
 #[cfg(test)]

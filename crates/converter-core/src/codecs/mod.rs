@@ -4,6 +4,8 @@ mod base32;
 mod base64;
 mod binary;
 mod caesar;
+mod compression;
+mod data_uri;
 mod decimal;
 mod hex;
 mod html;
@@ -13,6 +15,7 @@ mod punycode;
 mod reverse;
 mod url;
 
+pub(crate) use self::url::percent_decode;
 use crate::Codec;
 
 /// Tous les formats, dans l'ordre des onglets.
@@ -30,6 +33,11 @@ pub(crate) fn all() -> Vec<Box<dyn Codec>> {
         Box::new(self::octal::Octal),
         Box::new(self::reverse::Reverse),
         Box::new(self::punycode::Punycode),
+        Box::new(self::data_uri::DataUri),
+        Box::new(self::compression::Gzip),
+        Box::new(self::compression::Zlib),
+        Box::new(self::compression::Deflate),
+        Box::new(self::compression::Brotli),
     ]
 }
 

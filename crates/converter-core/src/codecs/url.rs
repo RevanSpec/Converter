@@ -72,44 +72,54 @@ impl Codec for Url {
     }
 
     fn decode(&self, input: &[u8], options: &Options) -> Result<Vec<u8>, CodecError> {
-        let plus_space = options.bool(&PLUS_SPACE)?;
-        let chars: Vec<char> = as_text(input)?.chars().collect();
-        let mut bytes = Vec::with_capacity(chars.len());
-        let mut i = 0;
-        while i < chars.len() {
-            match chars[i] {
-                '%' => {
-                    let digits: String = chars[i + 1..].iter().take(2).collect();
-                    let byte = (digits.len() == 2)
-                        .then(|| u8::from_str_radix(&digits, 16).ok())
-                        .flatten()
-                        .ok_or_else(|| {
-                            CodecError::spanning(
-                                ErrorCode::InvalidCharacter,
-                                i,
-                                i + 1 + digits.chars().count(),
-                                format!(
-                                    "Séquence « %{digits} » invalide en position {} : « % » doit être suivi de deux chiffres hexadécimaux.",
-                                    i + 1
-                                ),
-                            )
-                        })?;
-                    bytes.push(byte);
-                    i += 3;
-                }
-                '+' if plus_space => {
-                    bytes.push(b' ');
-                    i += 1;
-                }
-                c => {
-                    let mut buffer = [0u8; 4];
-                    bytes.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
-                    i += 1;
-                }
+        percent_decode(as_text(input)?, 0, options.bool(&PLUS_SPACE)?)
+    }
+}
+
+/// Décode l'encodage-pourcent de `text`, dont le premier caractère est à l'index `first`
+/// du texte saisi : les positions des erreurs portent sur ce texte saisi.
+pub(crate) fn percent_decode(
+    text: &str,
+    first: usize,
+    plus_space: bool,
+) -> Result<Vec<u8>, CodecError> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut bytes = Vec::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '%' => {
+                let digits: String = chars[i + 1..].iter().take(2).collect();
+                let byte = (digits.len() == 2)
+                    .then(|| u8::from_str_radix(&digits, 16).ok())
+                    .flatten()
+                    .ok_or_else(|| {
+                        let start = first + i;
+                        CodecError::spanning(
+                            ErrorCode::InvalidCharacter,
+                            start,
+                            start + 1 + digits.chars().count(),
+                            format!(
+                                "Séquence « %{digits} » invalide en position {} : « % » doit être suivi de deux chiffres hexadécimaux.",
+                                start + 1
+                            ),
+                        )
+                    })?;
+                bytes.push(byte);
+                i += 3;
+            }
+            '+' if plus_space => {
+                bytes.push(b' ');
+                i += 1;
+            }
+            c => {
+                let mut buffer = [0u8; 4];
+                bytes.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
+                i += 1;
             }
         }
-        Ok(bytes)
     }
+    Ok(bytes)
 }
 
 #[cfg(test)]
