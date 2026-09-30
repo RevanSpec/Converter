@@ -1,8 +1,8 @@
-//! Tests de propriété : décoder(encoder(x)) doit redonner x.
+//! Tests de propriété : décoder(encoder(x)) doit redonner x, pour chaque format.
 //!
-//! Les propriétés marquées `#[ignore]` décrivent des bugs connus, corrigés en phase 1
-//! de la roadmap (ROADMAP.md) : retirer le `#[ignore]` avec le correctif.
-//! `cargo test -- --ignored` les exécute.
+//! Deux formats ne sont réversibles que sur un texte bien formé : le Morse (qui perd
+//! la casse et les blancs répétés) et l'Inversion (un accent combinant isolé en tête
+//! de texte se rattache, une fois inversé, à la lettre qui le suit).
 
 use glass_converter_lib::converters::{decode, encode, ConvertOptions, ConverterFormat};
 use proptest::prelude::*;
@@ -64,7 +64,6 @@ fn byte_formats() -> impl Strategy<Value = (ConverterFormat, ConvertOptions)> {
 /// Formats qui transforment le texte lui-même ; César avec les décalages de l'interface.
 fn text_formats() -> impl Strategy<Value = (ConverterFormat, ConvertOptions)> {
     prop_oneof![
-        Just((ConverterFormat::Reverse, ConvertOptions::default())),
         Just((ConverterFormat::Html, ConvertOptions::default())),
         (1..=25i32).prop_map(|shift| (
             ConverterFormat::Caesar,
@@ -76,15 +75,41 @@ fn text_formats() -> impl Strategy<Value = (ConverterFormat, ConvertOptions)> {
     ]
 }
 
-/// Texte sans blanc au début ni à la fin, que `decode()` supprime aujourd'hui (B4).
-fn text_without_edge_whitespace() -> impl Strategy<Value = String> {
-    any::<String>().prop_map(|s| s.trim().to_string())
+/// Graphèmes complets qui restent distincts de leurs voisins dans n'importe quel ordre :
+/// lettres simples ou accentuées (précomposées ou non), emojis composés, drapeaux,
+/// idéogrammes, blancs et fin de ligne Windows.
+const GRAPHEMES: &[&str] = &[
+    "a",
+    "Z",
+    "7",
+    " ",
+    "!",
+    "\t",
+    "\n",
+    "\r\n",
+    "é",
+    "ç",
+    "e\u{301}",
+    "a\u{300}\u{327}",
+    "🦀",
+    "👍🏽",
+    "👨\u{200d}👩\u{200d}👧",
+    "🇫🇷",
+    "🇯🇵",
+    "漢",
+    "한",
+    "ع",
+];
+
+fn well_formed_text() -> impl Strategy<Value = String> {
+    prop::collection::vec(prop::sample::select(GRAPHEMES), 0..24).prop_map(|parts| parts.concat())
 }
 
-/// Mots de l'alphabet Morse en majuscules, séparés par une seule espace.
+/// Mots de l'alphabet Morse en majuscules, séparés par une espace, sur une ou plusieurs lignes.
 fn normalized_morse_text() -> impl Strategy<Value = String> {
-    prop::collection::vec("[A-Z0-9.,?'!/()&:;=+_\"$@-]{1,8}", 0..6)
-        .prop_map(|words| words.join(" "))
+    let line = prop::collection::vec("[A-Z0-9É.,?'!/()&:;=+_\"$@-]{1,8}", 0..6)
+        .prop_map(|words| words.join(" "));
+    prop::collection::vec(line, 1..4).prop_map(|lines| lines.join("\n"))
 }
 
 proptest! {
@@ -94,30 +119,31 @@ proptest! {
     }
 
     #[test]
-    fn text_formats_roundtrip_without_edge_whitespace(
-        text in text_without_edge_whitespace(),
-        (format, opts) in text_formats(),
-    ) {
+    fn text_formats_roundtrip(text in any::<String>(), (format, opts) in text_formats()) {
         assert_roundtrip(&text, format, &opts)?;
     }
 
-    /// Le Morse perd la casse et les blancs répétés : la propriété porte sur un texte normalisé.
+    #[test]
+    fn reverse_roundtrip_on_well_formed_text(text in well_formed_text()) {
+        assert_roundtrip(&text, ConverterFormat::Reverse, &ConvertOptions::default())?;
+    }
+
     #[test]
     fn morse_roundtrip_on_normalized_text(text in normalized_morse_text()) {
         assert_roundtrip(&text, ConverterFormat::Morse, &ConvertOptions::default())?;
     }
 
     #[test]
-    #[ignore = "B4 : decode() supprime les blancs de début et de fin (phase 1)"]
-    fn text_formats_roundtrip(text in any::<String>(), (format, opts) in text_formats()) {
-        assert_roundtrip(&text, format, &opts)?;
-    }
-
-    #[test]
-    #[ignore = "B2 : le décodage Punycode transforme les labels ASCII (phase 1)"]
     fn punycode_roundtrip_on_domains(
         text in "[a-zàâäçéèêëîïôöùûü]{1,12}(\\.[a-zàâäçéèêëîïôöùûü]{1,12}){0,3}",
     ) {
         assert_roundtrip(&text, ConverterFormat::Punycode, &ConvertOptions::default())?;
+    }
+
+    /// En mode brut (RFC 3492 sans préfixe), tout texte fait l'aller-retour.
+    #[test]
+    fn raw_punycode_roundtrip(text in any::<String>()) {
+        let raw = ConvertOptions { punycode_prefix: Some(false), ..Default::default() };
+        assert_roundtrip(&text, ConverterFormat::Punycode, &raw)?;
     }
 }
