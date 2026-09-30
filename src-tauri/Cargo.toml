@@ -1,7 +1,7 @@
 [package]
 name = "glass-converter"
 # Seule source du numéro de version : tauri.conf.json et package.json n'en déclarent pas.
-version = "0.1.0"
+version = "0.2.0"
 description = "Glassmorphic Text Converter Desktop App"
 authors = ["Odin"]
 license = "MIT OR Apache-2.0"
