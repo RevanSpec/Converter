@@ -10,6 +10,7 @@ const ALLOWED = [
   /^http:\/\/ipc\.localhost/, // IPC de Tauri, local à l'application
   /^http:\/\/www\.w3\.org\//, // espaces de noms XML (SVG), jamais téléchargés
   /^https?:\/\/example\.(com|org|net)(\/|$)/, // domaines réservés aux exemples (RFC 2606)
+  /^https:\/\/svelte\.dev\/e\//, // texte des erreurs du runtime Svelte (lien de documentation), jamais téléchargé
 ];
 
 function* walk(dir) {
