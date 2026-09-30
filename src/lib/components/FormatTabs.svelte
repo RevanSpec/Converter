@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Category } from "../../bindings/Category";
   import type { CodecMeta } from "../../bindings/CodecMeta";
+  import { CATEGORY_LABELS, groupByCategory } from "../formats";
 
   interface Props {
     codecs: CodecMeta[];
@@ -10,24 +10,7 @@
 
   let { codecs, selected, onselect }: Props = $props();
 
-  const CATEGORY_LABELS: Record<Category, string> = {
-    bytes: "Octets",
-    text: "Texte",
-    web: "Web",
-    cipher: "Chiffrement",
-  };
-
-  // Catégories dans l'ordre de leur premier format.
-  const groups = $derived.by(() => {
-    const order: Category[] = [];
-    for (const codec of codecs) {
-      if (!order.includes(codec.category)) order.push(codec.category);
-    }
-    return order.map((category) => ({
-      category,
-      codecs: codecs.filter((codec) => codec.category === category),
-    }));
-  });
+  const groups = $derived(groupByCategory(codecs));
 
   // Ordre de navigation au clavier : celui de l'affichage.
   const ordered = $derived(groups.flatMap((group) => group.codecs));

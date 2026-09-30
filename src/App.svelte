@@ -6,14 +6,32 @@
   import type { Direction } from "./bindings/Direction";
   import type { OptionValue } from "./bindings/OptionValue";
   import type { Options } from "./bindings/Options";
+  import type { Output } from "./bindings/Output";
+  import type { PipelineRequest } from "./bindings/PipelineRequest";
+  import type { Preset } from "./bindings/Preset";
+  import type { SavedRecipe } from "./bindings/SavedRecipe";
   import type { Span } from "./bindings/Span";
-  import { asCodecError, convert, listCodecs } from "./lib/api";
+  import type { Step } from "./bindings/Step";
+  import type { StepReport } from "./bindings/StepReport";
+  import {
+    asCodecError,
+    convert,
+    invertChain,
+    listCodecs,
+    listPresets,
+    listSavedRecipes,
+    runPipeline,
+  } from "./lib/api";
+  import { fromSteps, toSteps, type Layer } from "./lib/chain";
+  import { bytesToBase64, hexToBytes } from "./lib/hexdump";
   import { LatestRequest } from "./lib/latest";
   import { MorsePlayer } from "./lib/morse-player";
   import { defaultOptions } from "./lib/options";
   import { spanToUtf16 } from "./lib/positions";
-  import { FALLBACK_SAMPLE, SAMPLES } from "./lib/samples";
+  import { CHAIN_SAMPLE, FALLBACK_SAMPLE, SAMPLES } from "./lib/samples";
   import { charCount, formatMegabytes, utf8ByteLength } from "./lib/text";
+  import ChainEditor from "./lib/components/ChainEditor.svelte";
+  import ChainToolbar from "./lib/components/ChainToolbar.svelte";
   import FormatTabs from "./lib/components/FormatTabs.svelte";
   import Notice from "./lib/components/Notice.svelte";
   import OptionsBar from "./lib/components/OptionsBar.svelte";
@@ -29,9 +47,14 @@
 
   // État de l'application (purement en mémoire, aucun historique sauvegardé)
   let codecs = $state<CodecMeta[]>([]);
+  let mode = $state<"simple" | "chain">("simple");
   let codecId = $state("hex");
   let direction = $state<Direction>("encode");
   let optionsByCodec = $state<Record<string, Options>>({});
+  let layers = $state<Layer[]>([]);
+  let reports = $state.raw(new Map<number, StepReport>());
+  let presets = $state<Preset[]>([]);
+  let savedRecipes = $state<SavedRecipe[]>([]);
   let input = $state("");
   let output = $state("");
   let outputIsBinary = $state(false);
@@ -43,13 +66,32 @@
   let morsePlaying = $state(false);
   let sourceTextarea: HTMLTextAreaElement | undefined = $state();
 
+  // Sans fichier en entrée, un flux compressé ne peut pas être saisi : la compression
+  // n'est proposée que dans les chaînes (après un décodage Base64, par exemple).
+  const simpleCodecs = $derived(codecs.filter((c) => c.category !== "compression"));
   const codec = $derived(codecs.find((c) => c.id === codecId));
   const options = $derived(optionsByCodec[codecId] ?? {});
+  const chainSteps = $derived(toSteps(layers));
   const hasError = $derived(notice?.level === "error");
   const formatLabel = $derived(codec?.label ?? codecId);
-  const sourceTitle = $derived(direction === "encode" ? "Texte en clair" : formatLabel);
+  const sourceTitle = $derived(
+    mode === "chain" ? "Entrée" : direction === "encode" ? "Texte en clair" : formatLabel
+  );
   const targetTitle = $derived(
-    direction === "encode" ? formatLabel : outputIsBinary ? "Octets" : "Texte en clair"
+    mode === "chain"
+      ? "Sortie"
+      : direction === "encode"
+        ? formatLabel
+        : outputIsBinary
+          ? "Octets"
+          : "Texte en clair"
+  );
+  const reinjectBlocked = $derived(
+    outputIsBinary
+      ? "Un résultat binaire ne peut pas être réinjecté comme texte"
+      : hasError
+        ? "Corrigez d'abord l'erreur"
+        : null
   );
 
   const conversions = new LatestRequest();
@@ -60,6 +102,7 @@
     try {
       codecs = await listCodecs();
       optionsByCodec = Object.fromEntries(codecs.map((c) => [c.id, defaultOptions(c)]));
+      presets = await listPresets();
     } catch (error) {
       notice = {
         level: "error",
@@ -67,70 +110,121 @@
         span: null,
       };
     }
+    try {
+      savedRecipes = await listSavedRecipes();
+    } catch (error) {
+      showToast(asCodecError(error).message, true);
+    }
   });
 
   // Conversion en temps réel, 20 ms après le dernier changement de saisie, de format,
-  // de sens ou d'option.
+  // de sens, d'option ou de couche.
   $effect(() => {
-    const request: ConvertRequest = {
-      codec: codecId,
-      direction,
-      input,
-      options: $state.snapshot(options),
-    };
     if (codecs.length === 0) return;
-    const timer = setTimeout(() => run(request), 20);
+    if (mode === "simple") {
+      const request: ConvertRequest = {
+        codec: codecId,
+        direction,
+        input,
+        options: $state.snapshot(options),
+      };
+      const timer = setTimeout(() => runSimple(request), 20);
+      return () => clearTimeout(timer);
+    }
+    const snapshot = $state.snapshot(layers);
+    const keys = snapshot.map((layer) => layer.key);
+    const request: PipelineRequest = { input, steps: toSteps(snapshot) };
+    const timer = setTimeout(() => runChain(request, keys), 20);
     return () => clearTimeout(timer);
   });
 
-  async function run(request: ConvertRequest) {
-    const isLatest = conversions.begin();
-
-    if (!request.input) {
+  /**
+   * Vérifications communes à toute conversion : une saisie vide vide le résultat, une
+   * saisie trop grosse est refusée. Renvoie la taille de la saisie, ou `null` pour arrêter.
+   */
+  function precheck(text: string): number | null {
+    if (!text) {
       output = "";
       outputIsBinary = false;
       notice = null;
       stats = { ...EMPTY_STATS };
+      reports = new Map();
       status = "Prêt";
-      return;
+      return null;
     }
-
-    const inputBytes = utf8ByteLength(request.input);
-    if (inputBytes > MAX_BYTES) {
+    const bytes = utf8ByteLength(text);
+    if (bytes > MAX_BYTES) {
+      reports = new Map();
       fail(
-        request.input,
-        inputBytes,
-        `Texte trop volumineux (${formatMegabytes(inputBytes)}, maximum ${formatMegabytes(MAX_BYTES)}) : le traitement de fichiers arrivera dans une prochaine version.`,
+        text,
+        bytes,
+        `Texte trop volumineux (${formatMegabytes(bytes)}, maximum ${formatMegabytes(MAX_BYTES)}) : le traitement de fichiers arrivera dans une prochaine version.`,
         null
       );
-      return;
+      return null;
     }
-
     status = "Conversion...";
+    return bytes;
+  }
+
+  function show(
+    result: Output,
+    counts: { input_chars: number; input_bytes: number; output_chars: number; output_bytes: number },
+    inputBytes: number
+  ) {
+    outputIsBinary = result.kind === "bytes";
+    output = result.kind === "text" ? result.text : result.hex;
+    stats = {
+      inChars: counts.input_chars,
+      inBytes: counts.input_bytes,
+      outChars: counts.output_chars,
+      outBytes: counts.output_bytes,
+    };
+    notice =
+      inputBytes > WARN_BYTES
+        ? {
+            level: "warning",
+            message: `Texte volumineux (${formatMegabytes(inputBytes)}) : la conversion peut prendre du temps.`,
+            span: null,
+          }
+        : null;
+    status = "Converti";
+  }
+
+  async function runSimple(request: ConvertRequest) {
+    const isLatest = conversions.begin();
+    const inputBytes = precheck(request.input);
+    if (inputBytes === null) return;
     try {
       const response = await convert(request);
       // Une saisie plus récente a déjà relancé une conversion : ce résultat est périmé.
       if (!isLatest()) return;
-
-      outputIsBinary = response.output.kind === "bytes";
-      output = response.output.kind === "text" ? response.output.text : response.output.hex;
-      stats = {
-        inChars: response.input_chars,
-        inBytes: response.input_bytes,
-        outChars: response.output_chars,
-        outBytes: response.output_bytes,
-      };
-      notice =
-        inputBytes > WARN_BYTES
-          ? {
-              level: "warning",
-              message: `Texte volumineux (${formatMegabytes(inputBytes)}) : la conversion peut prendre du temps.`,
-              span: null,
-            }
-          : null;
-      status = "Converti";
+      show(response.output, response, inputBytes);
     } catch (error) {
       if (!isLatest()) return;
+      const { message, span } = asCodecError(error);
+      fail(request.input, inputBytes, message, span);
+    }
+  }
+
+  /** `keys` rattache chaque compte rendu à sa couche, même si la chaîne a bougé depuis. */
+  async function runChain(request: PipelineRequest, keys: number[]) {
+    const isLatest = conversions.begin();
+    const inputBytes = precheck(request.input);
+    if (inputBytes === null) return;
+    try {
+      const response = await runPipeline(request);
+      if (!isLatest()) return;
+      reports = new Map(keys.map((key, index) => [key, response.steps[index]]));
+      if (response.output && !response.error) {
+        show(response.output, response, inputBytes);
+      } else {
+        const { message, span } = asCodecError(response.error);
+        fail(request.input, inputBytes, message, span);
+      }
+    } catch (error) {
+      if (!isLatest()) return;
+      reports = new Map();
       const { message, span } = asCodecError(error);
       fail(request.input, inputBytes, message, span);
     }
@@ -143,6 +237,29 @@
     stats = { inChars: charCount(text), inBytes: bytes, outChars: 0, outBytes: 0 };
     notice = { level: "error", message, span };
     status = "Erreur";
+  }
+
+  /**
+   * En passant en mode Chaîne, la conversion en cours devient une chaîne d'une couche
+   * (si aucune chaîne n'existe déjà) ; une chaîne d'une seule couche revient en mode Simple.
+   */
+  function setMode(next: "simple" | "chain") {
+    if (next === mode) return;
+    morse.stop();
+    if (next === "chain" && layers.length === 0) {
+      layers = fromSteps([
+        { codec: codecId, direction, options: $state.snapshot(options), enabled: true },
+      ]);
+    }
+    if (next === "simple" && layers.length === 1) {
+      const { step } = $state.snapshot(layers[0]);
+      if (step.enabled && simpleCodecs.some((c) => c.id === step.codec)) {
+        codecId = step.codec;
+        direction = step.direction;
+        optionsByCodec[step.codec] = step.options;
+      }
+    }
+    mode = next;
   }
 
   function selectCodec(id: string) {
@@ -161,6 +278,25 @@
     output = previousInput;
   }
 
+  /** La sortie devient l'entrée de la chaîne inverse, qui doit redonner l'entrée d'origine. */
+  async function invertLayers() {
+    try {
+      const inverse = await invertChain(toSteps($state.snapshot(layers)));
+      const previousInput = input;
+      layers = fromSteps(inverse);
+      input = output;
+      output = previousInput;
+      showToast("Chaîne inversée : ordre et sens des couches");
+    } catch (error) {
+      showToast(asCodecError(error).message, true);
+    }
+  }
+
+  function loadChain(steps: Step[], name: string | null) {
+    layers = fromSteps(steps);
+    showToast(name ? `Recette « ${name} » chargée` : "Recette importée");
+  }
+
   async function copyResult() {
     if (!output) return;
     try {
@@ -168,6 +304,15 @@
       copied = true;
       showToast("Résultat copié dans le presse-papier !");
       setTimeout(() => (copied = false), 1600);
+    } catch (error) {
+      showToast(`Copie impossible : ${String(error)}`, true);
+    }
+  }
+
+  async function copyBase64() {
+    try {
+      await writeText(bytesToBase64(hexToBytes(output)));
+      showToast("Octets copiés en Base64");
     } catch (error) {
       showToast(`Copie impossible : ${String(error)}`, true);
     }
@@ -194,12 +339,17 @@
     outputIsBinary = false;
     notice = null;
     stats = { ...EMPTY_STATS };
+    reports = new Map();
     status = "Prêt";
     showToast("Zone de conversion vidée");
     sourceTextarea?.focus();
   }
 
   async function loadSample() {
+    if (mode === "chain") {
+      await loadChainSample();
+      return;
+    }
     const sample = SAMPLES[codecId] ?? FALLBACK_SAMPLE;
     if (direction === "encode") {
       input = sample;
@@ -218,6 +368,25 @@
     } catch (error) {
       showToast(`Exemple indisponible : ${asCodecError(error).message}`, true);
     }
+  }
+
+  /**
+   * L'exemple d'une chaîne est le texte d'exemple passé dans la chaîne inverse : il est
+   * valide pour une chaîne de décodages. Si l'inverse échoue (chaîne d'encodages, par
+   * exemple), le texte d'exemple est pris tel quel.
+   */
+  async function loadChainSample() {
+    try {
+      const inverse = await invertChain(toSteps($state.snapshot(layers)));
+      const response = await runPipeline({ input: CHAIN_SAMPLE, steps: inverse });
+      if (response.output?.kind === "text") {
+        input = response.output.text;
+        return;
+      }
+    } catch {
+      // Chaîne irréversible : le texte d'exemple suffit.
+    }
+    input = CHAIN_SAMPLE;
   }
 
   function toggleMorse() {
@@ -268,7 +437,7 @@
     <!-- Badge de confidentialité stricte (Zéro historique) -->
     <div
       class="privacy-badge"
-      title="Toutes les conversions sont traitées en mémoire vive. Aucun historique n'est stocké sur votre machine."
+      title="Toutes les conversions sont traitées en mémoire vive. Aucun texte saisi n'est stocké sur votre machine ; seules les recettes que vous enregistrez le sont, sans leur texte."
     >
       <span class="privacy-dot"></span>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -280,6 +449,26 @@
 
     <!-- Actions rapides globales -->
     <div class="header-actions">
+      <div class="segmented-control mode-switch" role="group" aria-label="Mode de conversion">
+        <button
+          class="segment"
+          class:active={mode === "simple"}
+          aria-pressed={mode === "simple"}
+          title="Un format, un sens"
+          onclick={() => setMode("simple")}
+        >
+          Simple
+        </button>
+        <button
+          class="segment"
+          class:active={mode === "chain"}
+          aria-pressed={mode === "chain"}
+          title="Plusieurs couches enchaînées : Base64 puis gzip, par exemple"
+          onclick={() => setMode("chain")}
+        >
+          Chaîne
+        </button>
+      </div>
       <button class="btn-ghost" title="Insérer un texte d'exemple pour tester" onclick={loadSample}>
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -300,9 +489,21 @@
     </div>
   </header>
 
-  <FormatTabs {codecs} selected={codecId} onselect={selectCodec} />
+  {#if mode === "simple"}
+    <FormatTabs codecs={simpleCodecs} selected={codecId} onselect={selectCodec} />
 
-  <OptionsBar {codec} {options} onchange={setOption} {morsePlaying} ontogglemorse={toggleMorse} />
+    <OptionsBar {codec} {options} onchange={setOption} {morsePlaying} ontogglemorse={toggleMorse} />
+  {:else}
+    <ChainToolbar
+      steps={chainSteps}
+      {codecs}
+      {presets}
+      saved={savedRecipes}
+      onload={loadChain}
+      onsaved={(list) => (savedRecipes = list)}
+      ontoast={showToast}
+    />
+  {/if}
 
   {#if notice}
     <Notice
@@ -313,7 +514,7 @@
   {/if}
 
   <!-- Espace de travail : Panneau double de conversion -->
-  <main class="converter-workspace">
+  <main class="converter-workspace" class:chain-mode={mode === "chain"}>
     <SourcePanel
       title={sourceTitle}
       value={input}
@@ -329,28 +530,39 @@
       bind:textarea={sourceTextarea}
     />
 
-    <!-- Séparateur central avec Bouton d'inversion des sens -->
-    <div class="swap-divider">
-      <div class="divider-line"></div>
-      <button
-        class="btn-swap glass-card"
-        class:rotated={direction === "decode"}
-        disabled={hasError || outputIsBinary}
-        title={outputIsBinary
-          ? "Un résultat binaire ne peut pas être réinjecté comme texte"
-          : "Inverser le sens de conversion (Texte ⇄ Encodé)"}
-        aria-label="Inverser le sens de conversion"
-        onclick={swapDirection}
-      >
-        <svg class="swap-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="17 1 21 5 17 9"></polyline>
-          <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
-          <polyline points="7 23 3 19 7 15"></polyline>
-          <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
-        </svg>
-      </button>
-      <div class="divider-line"></div>
-    </div>
+    {#if mode === "simple"}
+      <!-- Séparateur central avec Bouton d'inversion des sens -->
+      <div class="swap-divider">
+        <div class="divider-line"></div>
+        <button
+          class="btn-swap glass-card"
+          class:rotated={direction === "decode"}
+          disabled={reinjectBlocked !== null}
+          title={reinjectBlocked ?? "Inverser le sens de conversion (Texte ⇄ Encodé)"}
+          aria-label="Inverser le sens de conversion"
+          onclick={swapDirection}
+        >
+          <svg class="swap-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="17 1 21 5 17 9"></polyline>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+            <polyline points="7 23 3 19 7 15"></polyline>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+          </svg>
+        </button>
+        <div class="divider-line"></div>
+      </div>
+    {:else}
+      <ChainEditor
+        bind:layers
+        {codecs}
+        {reports}
+        idle={!input}
+        invertDisabled={reinjectBlocked !== null}
+        invertTitle={reinjectBlocked ??
+          "Inverser la chaîne : ordre et sens des couches ; la sortie devient l'entrée"}
+        oninvert={invertLayers}
+      />
+    {/if}
 
     <TargetPanel
       title={targetTitle}
@@ -362,6 +574,7 @@
       copyDisabled={hasError || !output}
       {copied}
       oncopy={copyResult}
+      oncopybase64={copyBase64}
     />
   </main>
 </div>

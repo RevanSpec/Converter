@@ -2,6 +2,7 @@
   import type { CodecMeta } from "../../bindings/CodecMeta";
   import type { OptionValue } from "../../bindings/OptionValue";
   import type { Options } from "../../bindings/Options";
+  import OptionField from "./OptionField.svelte";
 
   interface Props {
     codec: CodecMeta | undefined;
@@ -12,12 +13,6 @@
   }
 
   let { codec, options, onchange, morsePlaying, ontogglemorse }: Props = $props();
-
-  /** Le décalage César s'affiche « +13 (ROT13) », les autres entiers tels quels. */
-  function intLabel(value: number): string {
-    if (codec?.id !== "caesar") return String(value);
-    return value === 13 ? "+13 (ROT13)" : `+${value}`;
-  }
 </script>
 
 <div
@@ -43,66 +38,13 @@
     {/if}
 
     {#each codec?.options ?? [] as spec (spec.id)}
-      {@const kind = spec.kind}
-      {@const value = options[spec.id] ?? kind.default}
-      {#if kind.type === "choice"}
-        <span class="opt-label" id="opt-{spec.id}">{spec.label} :</span>
-        <div class="segmented-control" role="group" aria-labelledby="opt-{spec.id}">
-          {#each kind.choices as choice (choice.value)}
-            <button
-              class="segment"
-              class:active={value === choice.value}
-              aria-pressed={value === choice.value}
-              onclick={() => onchange(spec.id, choice.value)}
-            >
-              {choice.label}
-            </button>
-          {/each}
-        </div>
-      {:else if kind.type === "bool"}
-        <div class="toggle-control">
-          <label class="checkbox-container">
-            <input
-              type="checkbox"
-              checked={value === true}
-              onchange={(event) => onchange(spec.id, event.currentTarget.checked)}
-            />
-            <span class="checkmark"></span>
-            <span class="checkbox-text">{spec.label}</span>
-          </label>
-        </div>
-      {:else if kind.type === "int"}
-        <label class="opt-label" for="opt-{spec.id}">{spec.label} :</label>
-        <div class="slider-container">
-          <input
-            type="range"
-            id="opt-{spec.id}"
-            min={kind.min}
-            max={kind.max}
-            value={Number(value)}
-            aria-valuetext={intLabel(Number(value))}
-            oninput={(event) => onchange(spec.id, Number(event.currentTarget.value))}
-          />
-          <span class="slider-badge">{intLabel(Number(value))}</span>
-        </div>
-        <button
-          class="btn-micro"
-          disabled={value === kind.default}
-          onclick={() => onchange(spec.id, kind.default)}
-        >
-          Réinitialiser ({kind.default})
-        </button>
-      {:else if kind.type === "text"}
-        <label class="opt-label" for="opt-{spec.id}">{spec.label} :</label>
-        <input
-          class="opt-text"
-          id="opt-{spec.id}"
-          type={kind.secret ? "password" : "text"}
-          autocomplete="off"
-          value={String(value)}
-          oninput={(event) => onchange(spec.id, event.currentTarget.value)}
-        />
-      {/if}
+      <OptionField
+        {spec}
+        value={options[spec.id]}
+        idPrefix="opt"
+        codecId={codec?.id ?? ""}
+        onchange={(value) => onchange(spec.id, value)}
+      />
     {:else}
       <span class="generic-hint">Conversion instantanée bidirectionnelle en temps réel</span>
     {/each}

@@ -12,6 +12,10 @@ export const SAMPLES: Record<string, string> = {
   octal: "Octal 8-bits",
   reverse: "Épuré, moderne et fenêtré",
   punycode: "café-crème.fr",
+  data_uri: "Glass Converter, embarqué dans un Data URI",
 };
 
 export const FALLBACK_SAMPLE = "Exemple de texte moderne";
+
+/** Texte clair d'exemple du mode Chaîne ; il traverse la chaîne inverse. */
+export const CHAIN_SAMPLE = "Glass Converter : conversion multi-couche, 100 % hors ligne 🦀";
