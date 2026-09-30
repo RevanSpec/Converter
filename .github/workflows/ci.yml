@@ -30,8 +30,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Tests (Vitest)
+        run: npm test
+
       # `npm run build` = `tsc && vite build`
       - run: npm run build
+
+      - name: Aucune URL externe dans le build
+        run: npm run check:offline
 
   rust:
     name: Rust (${{ matrix.os }})
