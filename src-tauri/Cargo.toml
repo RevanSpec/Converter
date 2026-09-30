@@ -1,8 +1,11 @@
 [package]
 name = "glass-converter"
+# Seule source du numéro de version : tauri.conf.json et package.json n'en déclarent pas.
 version = "0.1.0"
 description = "Glassmorphic Text Converter Desktop App"
-authors = ["you"]
+authors = ["Odin"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/RevanSpec/Converter"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
