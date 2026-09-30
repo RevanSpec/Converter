@@ -10,6 +10,24 @@ pub enum Direction {
     Decode,
 }
 
+impl Direction {
+    /// L'autre sens.
+    pub fn reversed(self) -> Self {
+        match self {
+            Direction::Encode => Direction::Decode,
+            Direction::Decode => Direction::Encode,
+        }
+    }
+
+    /// Nom de l'opération, pour les messages : « encodage » ou « décodage ».
+    pub(crate) fn noun(self) -> &'static str {
+        match self {
+            Direction::Encode => "encodage",
+            Direction::Decode => "décodage",
+        }
+    }
+}
+
 /// Famille de formats, pour regrouper les onglets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(export))]
@@ -23,7 +41,14 @@ pub enum Category {
     Text,
     /// Chiffrements.
     Cipher,
+    /// Compression : des octets en entrée comme en sortie.
+    Compression,
 }
+
+/// Plafond de la sortie d'une conversion, et de chaque couche d'une chaîne : au-delà,
+/// la conversion échoue au lieu de saturer la mémoire (bombe de décompression, encodage
+/// binaire d'un texte énorme…).
+pub const MAX_OUTPUT_BYTES: usize = 100_000_000;
 
 /// Description d'un format pour l'interface et les recettes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

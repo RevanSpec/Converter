@@ -376,10 +376,11 @@ dependencies = [
 
 [[package]]
 name = "converter-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
- "hex",
+ "brotli",
+ "flate2",
  "htmlize",
  "idna",
  "proptest",
@@ -1166,9 +1167,10 @@ dependencies = [
 
 [[package]]
 name = "glass-converter"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "converter-core",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",

@@ -3,4 +3,4 @@
 /**
  * Nature d'une erreur. Stable : l'interface peut s'en servir pour traduire le message.
  */
-export type ErrorCode = "invalid_character" | "invalid_length" | "invalid_padding" | "mixed_alphabets" | "invalid_number" | "unknown_symbol" | "unsupported_character" | "invalid_domain" | "invalid_punycode" | "not_text" | "invalid_option" | "unknown_codec" | "internal";
+export type ErrorCode = "invalid_character" | "invalid_length" | "invalid_padding" | "mixed_alphabets" | "invalid_number" | "unknown_symbol" | "unsupported_character" | "invalid_domain" | "invalid_punycode" | "invalid_data_uri" | "invalid_compressed_data" | "output_too_large" | "not_text" | "invalid_option" | "unknown_codec" | "invalid_recipe" | "irreversible_step" | "storage" | "internal";

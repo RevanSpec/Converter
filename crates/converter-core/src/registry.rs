@@ -9,9 +9,12 @@ pub struct Registry {
 impl Registry {
     /// Tous les formats de l'application, dans l'ordre des onglets.
     pub fn standard() -> Self {
-        Self {
-            codecs: crate::codecs::all(),
-        }
+        Self::from_codecs(crate::codecs::all())
+    }
+
+    /// Registre limité à `codecs` : pour les tests, ou une application qui ajoute ses formats.
+    pub fn from_codecs(codecs: Vec<Box<dyn Codec>>) -> Self {
+        Self { codecs }
     }
 
     /// Format désigné par son identifiant ou l'un de ses alias, sans tenir compte de la casse.

@@ -23,12 +23,24 @@ pub enum ErrorCode {
     InvalidDomain,
     /// Séquence Punycode invalide.
     InvalidPunycode,
+    /// Data URI sans préfixe « data: » ou sans virgule.
+    InvalidDataUri,
+    /// Flux compressé corrompu, tronqué ou d'un autre format.
+    InvalidCompressedData,
+    /// Sortie au-delà du plafond : bombe de décompression, encodage démesuré…
+    OutputTooLarge,
     /// Le format attend du texte UTF-8 et a reçu d'autres octets.
     NotText,
     /// Option inconnue du format, ou valeur hors des choix possibles.
     InvalidOption,
     /// Format absent du registre.
     UnknownCodec,
+    /// Recette illisible : syntaxe, version ou contenu.
+    InvalidRecipe,
+    /// Chaîne impossible à inverser : une couche n'a pas d'opération inverse.
+    IrreversibleStep,
+    /// Lecture ou écriture impossible du fichier « Mes recettes ».
+    Storage,
     /// Échec interne.
     Internal,
 }

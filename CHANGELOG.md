@@ -3,6 +3,20 @@
 Les évolutions notables de Glass Converter sont listées ici, la plus récente en premier.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [0.4.0] - 2026-09-30
+
+### Ajouté
+
+- Mode Chaîne : plusieurs formats enchaînés, chacun avec son sens et ses options, activable, déplaçable à la souris ou au clavier (`Alt+↑/↓`) ; aperçu, taille, texte ou octets et durée sous chaque couche ; la première erreur nomme sa couche.
+- « Inverser » retourne une chaîne (ordre et sens) et reprend sa sortie comme entrée.
+- Recettes : forme courte à copier-coller (`base64:dec|hex:dec`), JSON versionné, recettes prêtes à l'emploi (Base64 double, Data URI, gzip + Base64, SAML) et « Mes recettes », écrites seulement quand vous enregistrez ou supprimez une recette, sans texte saisi ni option secrète.
+- Formats gzip, zlib, Deflate et Brotli (mode Chaîne), et Data URI.
+- Résultat binaire affiché en hexdump, copiable en hexadécimal ou en Base64.
+
+### Modifié
+
+- Plafond de 100 Mo par conversion et par couche : une bombe de décompression s'arrête avec une erreur.
+
 ## [0.3.0] - 2026-09-30
 
 ### Ajouté
@@ -54,6 +68,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 Première version : 12 formats, conversion bidirectionnelle en temps réel, interface glassmorphism.
 
+[0.4.0]: https://github.com/RevanSpec/Converter/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/RevanSpec/Converter/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/RevanSpec/Converter/compare/e409023...v0.2.0
 [0.1.0]: https://github.com/RevanSpec/Converter/tree/e409023

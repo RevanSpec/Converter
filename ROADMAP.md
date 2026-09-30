@@ -162,20 +162,20 @@ La v0.4 livre en 6 à 9 jours l'enchaînement de couches, le résultat de chacun
 
 **Moteur**
 
-- [ ] MC · `Pipeline` : couches (format, sens, options, activée ou non) exécutées sur des octets ; arrêt à la première erreur, qui nomme sa couche.
-- [ ] MC · Commande `run_pipeline` : un seul appel pour toute la chaîne ; pour chaque couche, un aperçu tronqué à 4 Ko, la taille, UTF-8 ou non, la durée.
-- [ ] MC · Inversion : ordre et sens inversés, refusée si une couche est irréversible.
-- [ ] MC · Recette versionnée : JSON `{"v":1,"steps":[…]}` et forme courte `b64:dec|hex:dec` ; les options secrètes ne sont jamais exportées.
-- [ ] I3 · Compression gzip, zlib, deflate et brotli (`flate2`, `brotli`), avec un plafond de sortie contre les bombes de décompression.
+- [x] MC · `Pipeline` : couches (format, sens, options, activée ou non) exécutées sur des octets ; arrêt à la première erreur, qui nomme sa couche.
+- [x] MC · Commande `run_pipeline` : un seul appel pour toute la chaîne ; pour chaque couche, un aperçu tronqué à 4 Ko, la taille, UTF-8 ou non, la durée.
+- [x] MC · Inversion : ordre et sens inversés, refusée si une couche est irréversible.
+- [x] MC · Recette versionnée : JSON `{"v":1,"steps":[…]}` et forme courte `b64:dec|hex:dec` ; les options secrètes ne sont jamais exportées.
+- [x] I3 · Compression gzip, zlib, deflate et brotli (`flate2`, `brotli`), avec un plafond de sortie contre les bombes de décompression.
 
 **Interface**
 
-- [ ] MC · Bascule « Simple / Chaîne » : la conversion en cours devient une chaîne d'une couche.
-- [ ] MC · Cartes de couche : format (liste avec recherche), sens, options, activer, supprimer, réordonner à la souris et au clavier (`Alt+↑/↓`).
-- [ ] MC · Aperçu et statut sous chaque couche ; la couche en erreur est mise en évidence.
-- [ ] I4 · Résultat final non UTF-8 affiché en hexdump (décalage, hex, ASCII), copiable en hex ou en Base64.
-- [ ] MC · Recettes prêtes à l'emploi : Base64 double, Data URI, gzip + Base64, SAML (deflate + Base64 + URL).
-- [ ] MC · Export et import d'une recette par copier-coller de sa forme courte.
+- [x] MC · Bascule « Simple / Chaîne » : la conversion en cours devient une chaîne d'une couche.
+- [x] MC · Cartes de couche : format (liste avec recherche), sens, options, activer, supprimer, réordonner à la souris et au clavier (`Alt+↑/↓`).
+- [x] MC · Aperçu et statut sous chaque couche ; la couche en erreur est mise en évidence.
+- [x] I4 · Résultat final non UTF-8 affiché en hexdump (décalage, hex, ASCII), copiable en hex ou en Base64.
+- [x] MC · Recettes prêtes à l'emploi : Base64 double, Data URI, gzip + Base64, SAML (deflate + Base64 + URL).
+- [x] MC · Export et import d'une recette par copier-coller de sa forme courte.
 
 **Sortie :** toute chaîne réversible aléatoire de 1 à 4 couches, suivie de son inverse, redonne l'entrée. `NDg2NTZjNmM2Zg==`, décodé par Base64 puis Hex, donne `Hello`.
 
@@ -297,13 +297,13 @@ La v1.0 sort en 4 à 7 jours : installable, signée, documentée, avec son outil
 
 ## Décisions à prendre
 
-Deux choix sont faits (licence, framework), cinq restent à faire.
+Trois choix sont faits (licence, framework, recettes), quatre restent à faire.
 
 | Décision | Options | Recommandation | Avant la phase |
 | --- | --- | --- | --- |
 | Licence | MIT, Apache-2.0, MIT + Apache-2.0, GPL-3.0 | Décidé (phase 0) : MIT + Apache-2.0 | 0 |
 | Framework de l'interface | TypeScript seul, Svelte 5, Solid, Preact | Décidé (phase 2) : Svelte 5 | 2 |
-| Enregistrement des recettes | Export seul, ou liste « Mes recettes » sur action explicite | Les deux : une recette ne contient aucune donnée saisie | 3 |
+| Enregistrement des recettes | Export seul, ou liste « Mes recettes » sur action explicite | Décidé (phase 3) : les deux ; une recette ne contient aucune donnée saisie | 3 |
 | Format de chiffrement | `age`, ou enveloppe maison AES-256-GCM ou XChaCha20 + Argon2id | `age` : standard, audité, interopérable | 6 |
 | Mises à jour | Aucune, vérification manuelle, automatique | Manuelle par défaut, automatique en option : chaque requête réseau doit être choisie | 8 |
 | Signature du code | Aucune, Windows, Windows + Apple | Windows d'abord, car SmartScreen avertit sans signature ; Apple si macOS est visé (compte payant) | 8 |
