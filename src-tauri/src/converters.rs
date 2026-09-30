@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use idna::punycode;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,8 +20,10 @@ pub enum ConverterFormat {
     Punycode,
 }
 
-impl ConverterFormat {
-    pub fn from_str(s: &str) -> Result<Self, String> {
+impl FromStr for ConverterFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "hex" | "hexadecimal" => Ok(Self::Hex),
             "binary" | "binaire" | "bin" => Ok(Self::Binary),
@@ -195,14 +198,9 @@ pub fn decode(
             let cleaned = trimmed
                 .replace("0x", "")
                 .replace("0X", "")
-                .replace(' ', "")
-                .replace(':', "")
-                .replace(',', "")
-                .replace('\n', "")
-                .replace('\r', "")
-                .replace('\t', "");
+                .replace([' ', ':', ',', '\n', '\r', '\t'], "");
 
-            if cleaned.len() % 2 != 0 {
+            if !cleaned.len().is_multiple_of(2) {
                 return Err(format!(
                     "Longueur hexadécimale impaire ({} caractères). Chaque octet nécessite 2 caractères hexadécimaux.",
                     cleaned.len()
@@ -246,7 +244,7 @@ pub fn decode(
                 }
             }
 
-            if cleaned.len() % 8 != 0 {
+            if !cleaned.len().is_multiple_of(8) {
                 return Err(format!(
                     "Longueur binaire invalide ({} bits). Elle doit être un multiple de 8 bits.",
                     cleaned.len()
@@ -377,7 +375,7 @@ fn base32_encode(data: &[u8]) -> String {
     }
 
     // Padding RFC 4648
-    while result.len() % 8 != 0 {
+    while !result.len().is_multiple_of(8) {
         result.push('=');
     }
 
@@ -584,7 +582,7 @@ fn morse_to_text(morse: &str) -> Result<String, String> {
 // CAESAR / ROT13
 // ==========================================
 fn caesar_shift(text: &str, shift: i32) -> String {
-    let s = ((shift % 26) + 26) % 26;
+    let s = shift.rem_euclid(26);
     text.chars()
         .map(|c| {
             if c.is_ascii_lowercase() {
