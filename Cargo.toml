@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 # Seule source du numéro de version : les crates en héritent, Tauri le reprend,
 # tauri.conf.json et package.json n'en déclarent pas.
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Odin"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/RevanSpec/Converter"

@@ -3,6 +3,22 @@
 Les évolutions notables de Glass Converter sont listées ici, la plus récente en premier.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [0.3.0] - 2026-09-30
+
+### Ajouté
+
+- Moteur séparé `converter-core` : chaque format travaille sur des octets ; un décodage qui ne donne pas de texte affiche les octets en hexadécimal.
+- Base64 sans « = » à l'encodage (forme des JWT) ; URL en mode « URI complète » et option « + = espace ».
+- Chaque erreur indique sa plage : la zone fautive est surlignée dans le texte saisi, et « Voir dans le texte » la sélectionne.
+- Onglets groupés par catégorie, navigation au clavier, rôles et libellés d'accessibilité.
+
+### Modifié
+
+- Interface réécrite en Svelte 5 et construite à partir des formats décrits par le moteur.
+- « ASCII Décimal » et « ASCII Octal » deviennent « Octets (décimal) » et « Octets (octal) ».
+- URL : le « + » n'est plus lu comme une espace, sauf avec l'option « + = espace ».
+- Workspace Cargo à la racine : la version se déclare dans le `Cargo.toml` racine et l'exécutable sort dans `target/release/`.
+
 ## [0.2.0] - 2026-09-30
 
 ### Corrigé
@@ -38,5 +54,6 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 Première version : 12 formats, conversion bidirectionnelle en temps réel, interface glassmorphism.
 
+[0.3.0]: https://github.com/RevanSpec/Converter/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/RevanSpec/Converter/compare/e409023...v0.2.0
 [0.1.0]: https://github.com/RevanSpec/Converter/tree/e409023
