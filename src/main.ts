@@ -1,4 +1,10 @@
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { LatestRequest } from "./latest";
+import { morseSchedule } from "./morse";
+import { charCount, formatMegabytes, utf8ByteLength } from "./text";
 
 // Interface des options de conversion
 interface ConvertOptions {
@@ -8,6 +14,7 @@ interface ConvertOptions {
   base64_url_safe?: boolean;
   caesar_shift?: number;
   punycode_prefix?: boolean;
+  morse_unknown?: "error" | "transliterate" | "ignore";
 }
 
 interface ConvertResult {
@@ -16,6 +23,37 @@ interface ConvertResult {
   input_bytes: number;
   output_chars: number;
   output_bytes: number;
+}
+
+/** Au-delà, la conversion peut ralentir l'interface : un avertissement s'affiche. */
+const WARN_BYTES = 5_000_000;
+/** Au-delà, la saisie directe est refusée (le mode fichier arrivera plus tard). */
+const MAX_BYTES = 50_000_000;
+/** Durée d'un point Morse, en secondes. */
+const MORSE_UNIT = 0.07;
+/** Fréquence des bips Morse, en hertz. */
+const MORSE_FREQUENCY = 650;
+
+// Textes clairs d'exemple ; en décodage, l'exemple est leur encodage.
+const SAMPLES: Record<string, string> = {
+  hex: "Bienvenue sur Glass Converter ! Un encodeur ultra-rapide en Rust 🦀",
+  binary: "Tauri + Rust = Performance & Élégance",
+  base64: "Sécurité & Confidentialité : aucun historique conservé.",
+  base32: "RFC 4648 Base32 Encoding",
+  morse: "SOS HELLO WORLD 2026",
+  url: "https://example.com/fr/docs/?search=glassmorphism&speed=fast#modern",
+  caesar: "Ce message est chiffré avec l'algorithme historique de César !",
+  html: "<span class=\"glass-pill\">Verre dépoli & reflets luminescents</span>",
+  asciidec: "Code ASCII Décimal",
+  asciioct: "Octal 8-bits",
+  reverse: "Épuré, moderne et fenêtré",
+  punycode: "café-crème.fr",
+};
+
+interface MorsePlayback {
+  oscillators: OscillatorNode[];
+  output: GainNode;
+  endTimer: number;
 }
 
 // État de l'application (purement en mémoire, aucun historique sauvegardé)
@@ -29,11 +67,13 @@ class ConverterApp {
     base64_url_safe: false,
     caesar_shift: 13,
     punycode_prefix: true,
+    morse_unknown: "transliterate",
   };
 
   private debounceTimer: number | null = null;
-  private isMorsePlaying = false;
+  private conversions = new LatestRequest();
   private audioCtx: AudioContext | null = null;
+  private morsePlayback: MorsePlayback | null = null;
 
   // Éléments DOM
   private sourceInput = document.getElementById("source-input") as HTMLTextAreaElement;
@@ -44,14 +84,15 @@ class ConverterApp {
   private sourceByteCount = document.getElementById("source-byte-count") as HTMLElement;
   private targetCharCount = document.getElementById("target-char-count") as HTMLElement;
   private targetByteCount = document.getElementById("target-byte-count") as HTMLElement;
-  private errorBanner = document.getElementById("error-banner") as HTMLElement;
-  private errorText = document.getElementById("error-text") as HTMLElement;
+  private noticeBanner = document.getElementById("error-banner") as HTMLElement;
+  private noticeText = document.getElementById("error-text") as HTMLElement;
   private swapBtn = document.getElementById("btn-swap-direction") as HTMLButtonElement;
   private copyBtn = document.getElementById("btn-copy-target") as HTMLButtonElement;
   private copyBtnText = document.getElementById("copy-btn-text") as HTMLElement;
   private toast = document.getElementById("toast") as HTMLElement;
   private toastText = document.getElementById("toast-text") as HTMLElement;
   private statusIndicator = document.getElementById("conversion-status") as HTMLElement;
+  private morseSoundLabel = document.getElementById("morse-sound-label") as HTMLElement;
 
   private formatLabels: Record<string, string> = {
     hex: "Hexadécimal",
@@ -102,14 +143,8 @@ class ConverterApp {
     });
 
     // Options Hexadécimal (séparateurs)
-    const hexSegments = document.querySelectorAll<HTMLButtonElement>("[data-hex-sep]");
-    hexSegments.forEach((seg) => {
-      seg.addEventListener("click", () => {
-        hexSegments.forEach((s) => s.classList.remove("active"));
-        seg.classList.add("active");
-        this.options.hex_separator = seg.getAttribute("data-hex-sep") || " ";
-        this.scheduleConversion();
-      });
+    this.bindSegments("[data-hex-sep]", "data-hex-sep", (value) => {
+      this.options.hex_separator = value;
     });
 
     // Option Hexadécimal (Majuscules)
@@ -122,25 +157,13 @@ class ConverterApp {
     }
 
     // Options Binaire
-    const binSegments = document.querySelectorAll<HTMLButtonElement>("[data-bin-spaced]");
-    binSegments.forEach((seg) => {
-      seg.addEventListener("click", () => {
-        binSegments.forEach((s) => s.classList.remove("active"));
-        seg.classList.add("active");
-        this.options.binary_spaced = seg.getAttribute("data-bin-spaced") === "true";
-        this.scheduleConversion();
-      });
+    this.bindSegments("[data-bin-spaced]", "data-bin-spaced", (value) => {
+      this.options.binary_spaced = value === "true";
     });
 
     // Options Base64
-    const b64Segments = document.querySelectorAll<HTMLButtonElement>("[data-b64-url]");
-    b64Segments.forEach((seg) => {
-      seg.addEventListener("click", () => {
-        b64Segments.forEach((s) => s.classList.remove("active"));
-        seg.classList.add("active");
-        this.options.base64_url_safe = seg.getAttribute("data-b64-url") === "true";
-        this.scheduleConversion();
-      });
+    this.bindSegments("[data-b64-url]", "data-b64-url", (value) => {
+      this.options.base64_url_safe = value === "true";
     });
 
     // Options César / ROT13
@@ -167,14 +190,13 @@ class ConverterApp {
     }
 
     // Options Punycode
-    const punySegments = document.querySelectorAll<HTMLButtonElement>("[data-puny-prefix]");
-    punySegments.forEach((seg) => {
-      seg.addEventListener("click", () => {
-        punySegments.forEach((s) => s.classList.remove("active"));
-        seg.classList.add("active");
-        this.options.punycode_prefix = seg.getAttribute("data-puny-prefix") === "true";
-        this.scheduleConversion();
-      });
+    this.bindSegments("[data-puny-prefix]", "data-puny-prefix", (value) => {
+      this.options.punycode_prefix = value === "true";
+    });
+
+    // Options Morse (caractères sans code)
+    this.bindSegments("[data-morse-unknown]", "data-morse-unknown", (value) => {
+      this.options.morse_unknown = value as ConvertOptions["morse_unknown"];
     });
 
     // Bouton Morse Audio
@@ -193,17 +215,8 @@ class ConverterApp {
     // Coller
     const pasteBtn = document.getElementById("btn-paste-source");
     if (pasteBtn) {
-      pasteBtn.addEventListener("click", async () => {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text) {
-            this.sourceInput.value = text;
-            this.scheduleConversion();
-            this.showToast("Texte collé depuis le presse-papier");
-          }
-        } catch (e) {
-          console.error("Impossible de lire le presse-papier:", e);
-        }
+      pasteBtn.addEventListener("click", () => {
+        this.pasteFromClipboard();
       });
     }
 
@@ -221,10 +234,13 @@ class ConverterApp {
     const clearAllBtn = document.getElementById("btn-clear-all");
     if (clearAllBtn) {
       clearAllBtn.addEventListener("click", () => {
+        this.conversions.invalidate();
         this.sourceInput.value = "";
         this.targetOutput.value = "";
-        this.hideError();
+        this.hideNotice();
+        this.setErrorState(false);
         this.updateStats(0, 0, 0, 0);
+        this.updateStatus("Prêt");
         this.showToast("Zone de conversion vidée");
         this.sourceInput.focus();
       });
@@ -237,6 +253,19 @@ class ConverterApp {
         this.loadSample();
       });
     }
+  }
+
+  /** Contrôle segmenté : un seul segment actif, sa valeur est transmise à `apply`. */
+  private bindSegments(selector: string, attribute: string, apply: (value: string) => void) {
+    const segments = document.querySelectorAll<HTMLButtonElement>(selector);
+    segments.forEach((seg) => {
+      seg.addEventListener("click", () => {
+        segments.forEach((s) => s.classList.remove("active"));
+        seg.classList.add("active");
+        apply(seg.getAttribute(attribute) ?? "");
+        this.scheduleConversion();
+      });
+    });
   }
 
   private updateTitles() {
@@ -289,12 +318,24 @@ class ConverterApp {
 
   private async performConversion() {
     const input = this.sourceInput.value;
+    const isLatest = this.conversions.begin();
 
     if (!input) {
       this.targetOutput.value = "";
-      this.hideError();
+      this.hideNotice();
+      this.setErrorState(false);
       this.updateStats(0, 0, 0, 0);
       this.updateStatus("Prêt");
+      return;
+    }
+
+    const inputBytes = utf8ByteLength(input);
+    if (inputBytes > MAX_BYTES) {
+      this.showConversionError(
+        `Texte trop volumineux (${formatMegabytes(inputBytes)}, maximum ${formatMegabytes(MAX_BYTES)}) : le traitement de fichiers arrivera dans une prochaine version.`,
+        input,
+        inputBytes
+      );
       return;
     }
 
@@ -306,21 +347,44 @@ class ConverterApp {
         toEncoded: this.toEncoded,
         options: this.options,
       });
+      // Une saisie plus récente a déjà relancé une conversion : ce résultat est périmé.
+      if (!isLatest()) return;
 
       this.targetOutput.value = result.output;
-      this.hideError();
+      this.setErrorState(false);
       this.updateStats(
         result.input_chars,
         result.input_bytes,
         result.output_chars,
         result.output_bytes
       );
+      if (inputBytes > WARN_BYTES) {
+        this.showNotice(
+          `Texte volumineux (${formatMegabytes(inputBytes)}) : la conversion peut prendre du temps.`,
+          "warning"
+        );
+      } else {
+        this.hideNotice();
+      }
       this.updateStatus("Converti");
     } catch (err: unknown) {
-      const errMsg = typeof err === "string" ? err : String(err);
-      this.showError(errMsg);
-      this.updateStatus("Erreur");
+      if (!isLatest()) return;
+      this.showConversionError(typeof err === "string" ? err : String(err), input, inputBytes);
     }
+  }
+
+  /** En erreur, l'ancien résultat disparaît : il ne peut plus être copié ni réinjecté. */
+  private showConversionError(message: string, input: string, inputBytes: number) {
+    this.targetOutput.value = "";
+    this.updateStats(charCount(input), inputBytes, 0, 0);
+    this.showNotice(message, "error");
+    this.setErrorState(true);
+    this.updateStatus("Erreur");
+  }
+
+  private setErrorState(hasError: boolean) {
+    this.copyBtn.disabled = hasError;
+    this.swapBtn.disabled = hasError;
   }
 
   private updateStats(inChars: number, inBytes: number, outChars: number, outBytes: number) {
@@ -336,13 +400,14 @@ class ConverterApp {
     }
   }
 
-  private showError(msg: string) {
-    this.errorText.textContent = msg;
-    this.errorBanner.classList.remove("hidden");
+  private showNotice(msg: string, level: "error" | "warning") {
+    this.noticeText.textContent = msg;
+    this.noticeBanner.classList.toggle("warning", level === "warning");
+    this.noticeBanner.classList.remove("hidden");
   }
 
-  private hideError() {
-    this.errorBanner.classList.add("hidden");
+  private hideNotice() {
+    this.noticeBanner.classList.add("hidden");
   }
 
   private async copyToClipboard() {
@@ -350,7 +415,7 @@ class ConverterApp {
     if (!text) return;
 
     try {
-      await navigator.clipboard.writeText(text);
+      await writeText(text);
       this.copyBtn.classList.add("btn-copied");
       this.copyBtnText.textContent = "Copié !";
       this.showToast("Résultat copié dans le presse-papier !");
@@ -360,118 +425,102 @@ class ConverterApp {
         this.copyBtnText.textContent = "Copier";
       }, 1600);
     } catch (err) {
-      console.error("Échec de la copie:", err);
+      this.showToast(`Copie impossible : ${String(err)}`, true);
     }
   }
 
-  private showToast(message: string) {
+  private async pasteFromClipboard() {
+    try {
+      const text = await readText();
+      if (!text) {
+        this.showToast("Le presse-papier est vide", true);
+        return;
+      }
+      this.sourceInput.value = text;
+      this.scheduleConversion();
+      this.showToast("Texte collé depuis le presse-papier");
+    } catch {
+      this.showToast("Le presse-papier ne contient pas de texte lisible", true);
+    }
+  }
+
+  private showToast(message: string, isError = false) {
     this.toastText.textContent = message;
+    this.toast.classList.toggle("toast-error", isError);
     this.toast.classList.add("show");
     setTimeout(() => {
       this.toast.classList.remove("show");
     }, 2200);
   }
 
-  private loadSample() {
-    const samples: Record<string, string> = {
-      hex: "Bienvenue sur Glass Converter ! Un encodeur ultra-rapide en Rust 🦀",
-      binary: "Tauri + Rust = Performance & Élégance",
-      base64: "Sécurité & Confidentialité : aucun historique conservé.",
-      base32: "RFC 4648 Base32 Encoding",
-      morse: "SOS HELLO WORLD 2026",
-      url: "https://tauri.app/fr/docs/?search=glassmorphism&speed=fast#modern",
-      caesar: "Ce message est chiffré avec l'algorithme historique de César !",
-      html: "<span class=\"glass-pill\">Verre dépoli & reflets luminescents</span>",
-      asciidec: "Code ASCII Décimal",
-      asciioct: "Octal 8-bits",
-      reverse: "Épuré, moderne et fenêtré",
-      punycode: "café-crème.fr",
-    };
+  private async loadSample() {
+    const sample = SAMPLES[this.currentFormat] || "Exemple de texte moderne";
 
     if (this.toEncoded) {
-      this.sourceInput.value = samples[this.currentFormat] || "Exemple de texte moderne";
+      this.sourceInput.value = sample;
     } else {
-      // Si on est en mode décodage, charger un exemple déjà encodé !
-      const encodedSamples: Record<string, string> = {
-        hex: "42 6f 6e 6a 6f 75 72 20 6c 65 20 6d 6f 6e 64 65",
-        binary: "01000010 01101111 01101110 01101010 01101111 01110101 01110010",
-        base64: "VGF1cmkgKyBSdXN0ID0gUGVyZm9ybWFuY2U=",
-        base32: "JBSWY3DPEBLW64TMMQ======",
-        morse: "... --- ... / .... . .-.. .-.. ---",
-        url: "https%3A%2F%2Fexample.com%2F%3Fq%3Dtest%20modern",
-        caesar: "Pr zrffntr rfg puvssre nirp y'nytbevguzr!",
-        html: "&lt;div&gt;Texte &amp; Symboles&lt;/div&gt;",
-        asciidec: "72 101 108 108 111",
-        asciioct: "110 145 154 154 157",
-        reverse: "ertênet te enredom ,érupÉ",
-        punycode: "xn--caf-crme-d4a.fr",
-      };
-      this.sourceInput.value = encodedSamples[this.currentFormat] || "48 65 6c 6c 6f";
+      // En décodage, l'exemple est l'encodage du texte clair avec les options courantes :
+      // il est donc toujours valide, quel que soit le décalage César choisi.
+      try {
+        const result = await invoke<ConvertResult>("convert_text", {
+          input: sample,
+          format: this.currentFormat,
+          toEncoded: true,
+          options: this.options,
+        });
+        this.sourceInput.value = result.output;
+      } catch (err) {
+        this.showToast(`Exemple indisponible : ${String(err)}`, true);
+        return;
+      }
     }
 
     this.scheduleConversion();
   }
 
   // Synthétiseur audio Web Audio API pour le code Morse
-  private async toggleMorseAudio() {
-    if (this.isMorsePlaying) {
+  private toggleMorseAudio() {
+    if (this.morsePlayback) {
       this.stopMorseAudio();
       return;
     }
 
     const morseText = this.toEncoded ? this.targetOutput.value : this.sourceInput.value;
-    if (!morseText || !morseText.trim()) {
-      this.showToast("Aucun code Morse à écouter");
+    const { beeps, totalUnits } = morseSchedule(morseText);
+    if (beeps.length === 0) {
+      this.showToast("Aucun code Morse à écouter", true);
       return;
     }
 
-    this.isMorsePlaying = true;
-    const soundLabel = document.getElementById("morse-sound-label");
-    if (soundLabel) soundLabel.textContent = "Arrêter l'audio";
+    this.audioCtx ??= new AudioContext();
+    const ctx = this.audioCtx;
+    const output = ctx.createGain();
+    output.connect(ctx.destination);
 
-    if (!this.audioCtx) {
-      this.audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    }
+    const origin = ctx.currentTime + 0.05;
+    const oscillators = beeps.map((beep) =>
+      this.playBeep(ctx, output, origin + beep.start * MORSE_UNIT, beep.duration * MORSE_UNIT)
+    );
+    const endTimer = window.setTimeout(
+      () => this.stopMorseAudio(),
+      (0.05 + totalUnits * MORSE_UNIT) * 1000 + 100
+    );
 
-    const dotDuration = 0.07; // 70ms par point
-    const freq = 650; // Fréquence 650Hz agréable
-
-    try {
-      let currentTime = this.audioCtx.currentTime + 0.05;
-
-      for (const char of morseText) {
-        if (!this.isMorsePlaying) break;
-
-        if (char === ".") {
-          this.playBeep(currentTime, dotDuration, freq);
-          currentTime += dotDuration + dotDuration; // Durée du point + silence inter-élément
-        } else if (char === "-") {
-          this.playBeep(currentTime, dotDuration * 3, freq);
-          currentTime += dotDuration * 3 + dotDuration; // Durée du trait + silence
-        } else if (char === " ") {
-          currentTime += dotDuration * 2; // Espace entre lettres
-        } else if (char === "/") {
-          currentTime += dotDuration * 5; // Espace entre mots
-        }
-      }
-
-      const totalWait = (currentTime - this.audioCtx.currentTime) * 1000;
-      setTimeout(() => {
-        this.stopMorseAudio();
-      }, Math.max(totalWait, 100));
-    } catch (e) {
-      console.error("Audio error:", e);
-      this.stopMorseAudio();
-    }
+    this.morsePlayback = { oscillators, output, endTimer };
+    this.morseSoundLabel.textContent = "Arrêter l'audio";
   }
 
-  private playBeep(startTime: number, duration: number, freq: number) {
-    if (!this.audioCtx) return;
-    const osc = this.audioCtx.createOscillator();
-    const gain = this.audioCtx.createGain();
+  private playBeep(
+    ctx: AudioContext,
+    output: AudioNode,
+    startTime: number,
+    duration: number
+  ): OscillatorNode {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
     osc.type = "sine";
-    osc.frequency.setValueAtTime(freq, startTime);
+    osc.frequency.setValueAtTime(MORSE_FREQUENCY, startTime);
 
     // Enveloppe d'attaque et d'extinction douce (éviter les clics audio)
     gain.gain.setValueAtTime(0, startTime);
@@ -480,16 +529,29 @@ class ConverterApp {
     gain.gain.linearRampToValueAtTime(0, startTime + duration);
 
     osc.connect(gain);
-    gain.connect(this.audioCtx.destination);
+    gain.connect(output);
 
     osc.start(startTime);
     osc.stop(startTime + duration);
+    return osc;
   }
 
+  /** Coupe le son tout de suite, y compris les bips déjà programmés. */
   private stopMorseAudio() {
-    this.isMorsePlaying = false;
-    const soundLabel = document.getElementById("morse-sound-label");
-    if (soundLabel) soundLabel.textContent = "Écouter le Morse (Bips audio)";
+    const playback = this.morsePlayback;
+    if (!playback) return;
+
+    this.morsePlayback = null;
+    window.clearTimeout(playback.endTimer);
+    playback.output.disconnect();
+    for (const osc of playback.oscillators) {
+      try {
+        osc.stop();
+      } catch {
+        // Bip déjà terminé
+      }
+    }
+    this.morseSoundLabel.textContent = "Écouter le Morse (Bips audio)";
   }
 }
 

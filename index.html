@@ -4,13 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Glass Converter — Encodeur & Décodeur Universel</title>
-    <!-- Google Fonts Inter & JetBrains Mono -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Polices Inter et JetBrains Mono embarquées (importées par main.ts) : aucune requête réseau -->
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
@@ -179,6 +173,12 @@
             </svg>
             <span id="morse-sound-label">Écouter le Morse (Bips audio)</span>
           </button>
+          <label class="opt-label">Caractères sans code :</label>
+          <div class="segmented-control">
+            <button class="segment" data-morse-unknown="error">Erreur</button>
+            <button class="segment active" data-morse-unknown="transliterate">Translittérer (à → A)</button>
+            <button class="segment" data-morse-unknown="ignore">Ignorer</button>
+          </div>
         </div>
 
         <!-- Options Punycode -->
@@ -186,7 +186,7 @@
           <label class="opt-label">Format de sortie :</label>
           <div class="segmented-control">
             <button class="segment active" data-puny-prefix="true">Préfixe xn-- (Standard IDN)</button>
-            <button class="segment" data-puny-prefix="false">Punycode brut</button>
+            <button class="segment" data-puny-prefix="false">Punycode brut (RFC 3492)</button>
           </div>
         </div>
 
