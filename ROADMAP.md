@@ -94,34 +94,34 @@ La v0.2 sort en 3 à 5 jours sans aucun résultat faux ni aucune requête résea
 
 **Moteur**
 
-- [ ] B2 D7 A4 · Punycode : ne décoder que les labels `xn--`, passer par `idna::domain_to_ascii` et `domain_to_unicode`, découper sur les espaces avant les points. Tests : `xn--caf-dma.com` → `café.com`, `example.com` inchangé, `Café.fr` → `xn--caf-dma.fr`.
-- [ ] B3 A7 · Base64 : décodage avec `DecodePaddingMode::Indifferent` et alphabet détecté (`-_` ou `+/`). Tests : `SGVsbG8` → `Hello`, contenu d'un JWT décodé.
-- [ ] B4 · Supprimer le `trim()` global : hex, binaire, Base64, Base32, décimal, octal et Morse gèrent eux-mêmes les blancs ; les autres formats gardent l'entrée intacte.
-- [ ] D5 A6 · Inversion par graphèmes (`unicode-segmentation`). Test : `👍🏽` reste `👍🏽`.
-- [ ] D6 A5 · Entités HTML5 complètes (`htmlize`). Test : `&eacute;t&eacute; &hellip;` → `été …`.
-- [ ] D4 · Morse : `É` en `..-..` (ITU), option pour les autres caractères (erreur, ignorer, translittérer `é` en `E`), retours à la ligne conservés.
-- [ ] D8 · Base32 : refuser les longueurs impossibles et le padding incohérent (`A` devient une erreur).
-- [ ] D8 · Hex : accepter `-`, `\x`, `%`, `0x`, `:` et `,` comme séparateurs ; tout autre caractère reste une erreur.
-- [ ] D8 · Positions d'erreur calculées sur le texte saisi, pas sur le texte nettoyé.
+- [x] B2 D7 A4 · Punycode : ne décoder que les labels `xn--`, encoder avec `idna::domain_to_ascii`, découper sur les espaces avant les points. Tests : `xn--caf-dma.com` → `café.com`, `example.com` inchangé, `Café.fr` → `xn--caf-dma.fr`.
+- [x] B3 A7 · Base64 : décodage avec `DecodePaddingMode::Indifferent` et alphabet détecté (`-_` ou `+/`). Tests : `SGVsbG8` → `Hello`, contenu d'un JWT décodé.
+- [x] B4 · Supprimer le `trim()` global : hex, binaire, Base64, Base32, décimal, octal et Morse gèrent eux-mêmes les blancs ; les autres formats gardent l'entrée intacte.
+- [x] D5 A6 · Inversion par graphèmes (`unicode-segmentation`). Test : `👍🏽` reste `👍🏽`.
+- [x] D6 A5 · Entités HTML5 complètes (`htmlize`). Test : `&eacute;t&eacute; &hellip;` → `été …`.
+- [x] D4 · Morse : `É` en `..-..` (ITU), option pour les autres caractères (erreur, ignorer, translittérer `à` en `A`), retours à la ligne conservés.
+- [x] D8 · Base32 : refuser les longueurs impossibles et le padding incohérent (`A` devient une erreur).
+- [x] D8 · Hex : accepter `-`, `\x`, `%`, `0x`, `:` et `,` comme séparateurs ; tout autre caractère reste une erreur.
+- [x] D8 · Positions d'erreur calculées sur le texte saisi, pas sur le texte nettoyé.
 
 **Interface**
 
-- [ ] D2 · En cas d'erreur : vider le résultat et les compteurs, désactiver « Copier » et « Inverser ».
-- [ ] D3 · Audio Morse : garder les oscillateurs programmés pour vraiment les arrêter, identifiant de lecture contre l'ancien minuteur, 7 unités entre deux mots.
-- [ ] D1 · Exemples de décodage produits en encodant l'exemple clair avec les options courantes : plus d'exemple faux ni de coquille, décalage César respecté.
-- [ ] A18 · Rendre le message d'erreur sélectionnable.
-- [ ] A15 · Presse-papier via `tauri-plugin-clipboard-manager`, avec un message visible en cas d'échec.
+- [x] D2 · En cas d'erreur : vider le résultat et les compteurs, désactiver « Copier » et « Inverser ».
+- [x] D3 · Audio Morse : garder les oscillateurs programmés pour vraiment les arrêter, identifiant de lecture contre l'ancien minuteur, 7 unités entre deux mots.
+- [x] D1 · Exemples de décodage produits en encodant l'exemple clair avec les options courantes : plus d'exemple faux ni de coquille, décalage César respecté.
+- [x] A18 · Rendre le message d'erreur sélectionnable.
+- [x] A15 · Presse-papier via `tauri-plugin-clipboard-manager`, avec un message visible en cas d'échec.
 
 **Performance et confidentialité**
 
-- [ ] B6 A10 · Commande `async` (calcul dans `spawn_blocking`) et numéro de requête côté interface pour ignorer les réponses périmées.
-- [ ] A11 · Avertir au-delà de 5 Mo saisis, refuser au-delà de 50 Mo (le mode fichier arrive en phase 4).
-- [ ] B7 A12 · Polices embarquées (`@fontsource/inter`, `@fontsource/jetbrains-mono`), liens Google supprimés.
-- [ ] B7 A12 · CSP stricte (`default-src 'self' ipc: http://ipc.localhost`), avec une `devCsp` pour le développement.
-- [ ] B7 · Webview en navigation privée (`"incognito": true`) : ni cache ni stockage sur disque.
-- [ ] A13 · `withGlobalTauri: false`.
-- [ ] A14 · Retirer `tauri-plugin-opener` (Cargo, `lib.rs`, capability, `package.json`).
-- [ ] B7 · La CI échoue si `dist/` contient une URL externe.
+- [x] B6 A10 · Commande `async` (calcul dans `spawn_blocking`) et numéro de requête côté interface pour ignorer les réponses périmées.
+- [x] A11 · Avertir au-delà de 5 Mo saisis, refuser au-delà de 50 Mo (le mode fichier arrive en phase 4).
+- [x] B7 A12 · Polices embarquées (`@fontsource-variable/inter`, `@fontsource-variable/jetbrains-mono`), liens Google supprimés.
+- [x] B7 A12 · CSP stricte (`default-src 'self'`, IPC seul en `connect-src`) ; pas de `devCsp`, car Tauri n'applique pas de CSP au serveur Vite de développement.
+- [x] B7 · Webview en navigation privée (`"incognito": true`) : ni cache ni stockage sur disque.
+- [x] A13 · `withGlobalTauri: false`.
+- [x] A14 · Retirer `tauri-plugin-opener` (Cargo, `lib.rs`, capability, `package.json`).
+- [x] B7 · La CI échoue si `dist/` contient une URL externe.
 
 **Sortie :** le test de propriété couvre tous les formats (Morse sur entrée normalisée), et une capture réseau au lancement ne montre aucune requête.
 
