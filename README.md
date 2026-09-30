@@ -39,16 +39,28 @@ L'application permet la conversion bidirectionnelle instantanée entre du texte 
 | :--- | :--- |
 | **Hexadécimal** | Séparateurs configurables (espace, continu, préfixe `0x`, deux-points), majuscules/minuscules ; au décodage, accepte aussi `\x`, `%`, `-`, `,` et `;` |
 | **Binaire** | Groupes d'octets de 8 bits ou séquence continue |
-| **Base64** | Standard RFC 4648 ou URL-Safe (`-_`) ; au décodage, `=` final facultatif et alphabet détecté automatiquement |
+| **Base64** | Standard RFC 4648 ou URL-Safe (`-_`), avec ou sans `=` (forme des JWT) ; au décodage, `=` final facultatif et alphabet détecté automatiquement |
 | **Base32** | Alphabet RFC 4648 avec gestion du padding ; texte tronqué signalé |
 | **Code Morse** | Standard international ITU-R (dont `É`), lignes conservées, caractères sans code refusés, translittérés (`à` → `A`) ou ignorés, lecteur audio intégré |
-| **URL Encode** | Percent-encoding conforme URI |
+| **URL Encode** | Percent-encoding RFC 3986 : composant (tout encoder) ou URI complète (garde `:/?#&=`), option « `+` = espace » des formulaires |
 | **HTML Entities** | Échappement, et déséchappement de toutes les entités nommées HTML5 et des entités numériques |
 | **ROT13 / César** | Décalage alphabétique configurable de 1 à 25 (curseur dynamique) |
-| **ASCII Décimal** | Séquences de valeurs d'octets numériques base 10 |
-| **ASCII Octal** | Séquences d'octets en base 8 |
+| **Octets (décimal)** | Valeur de chaque octet UTF-8, de 0 à 255 |
+| **Octets (octal)** | Valeur de chaque octet UTF-8 en base 8, de 000 à 377 |
 | **Inversion** | Inversion par graphèmes : emojis composés et accents restent intacts |
 | **Punycode (IDN)** | Noms de domaine internationalisés (UTS #46, préfixe `xn--`) ou Punycode brut RFC 3492 |
+
+Un décodage qui ne produit pas du texte UTF-8 (une image en Base64, par exemple) affiche ses octets en hexadécimal. Chaque erreur indique sa position, et la zone fautive est surlignée dans le texte saisi.
+
+---
+
+## 🧱 Architecture
+
+- `crates/converter-core` : le moteur, en Rust et sans Tauri. Chaque format implémente le trait `Codec` sur des octets et décrit ses options ; le registre les rassemble.
+- `src-tauri` : l'application, qui expose les commandes `list_codecs` et `convert`.
+- `src` : l'interface Svelte 5, construite à partir de `list_codecs`. Ses types (`src/bindings`) sont générés depuis Rust par `ts-rs` à chaque `cargo test`.
+
+Ajouter un format : un fichier dans `crates/converter-core/src/codecs/`, avec ses tests, puis une ligne dans `codecs::all`. L'interface l'affiche sans autre modification.
 
 ---
 
@@ -73,20 +85,19 @@ Cette commande démarre le serveur de développement Vite et lance la fenêtre d
 
 Le moteur de conversion est couvert par quatre familles de tests :
 
-- des tests unitaires d'aller-retour et d'erreurs par format (`src-tauri/src/converters.rs`) ;
-- les vecteurs officiels de la RFC 4648 pour Base16, Base32 et Base64 (`src-tauri/tests/rfc4648.rs`) ;
-- des tests de propriété `proptest` : décoder(encoder(x)) redonne x pour chaque format, sur 256 textes aléatoires par propriété à chaque exécution (`src-tauri/tests/roundtrip_props.rs`) ;
-- un test de non-régression par bug corrigé (`src-tauri/tests/regressions.rs`).
+- des tests unitaires dans le fichier de chaque format (`crates/converter-core/src/codecs/`) ;
+- les vecteurs officiels de la RFC 4648 pour Base16, Base32 et Base64 (`crates/converter-core/tests/rfc4648.rs`) ;
+- des tests de propriété `proptest` : décoder(encoder(x)) redonne x pour chaque format, y compris sur des octets quelconques, avec 256 cas aléatoires par propriété à chaque exécution (`crates/converter-core/tests/roundtrip_props.rs`) ;
+- un test de non-régression par bug corrigé (`crates/converter-core/tests/regressions.rs`).
 
-L'interface a ses tests Vitest (`src/*.test.ts`) : calendrier des bips Morse, réponses périmées, tailles de texte.
+L'interface a ses tests Vitest (`src/lib/*.test.ts`) : calendrier des bips Morse, réponses périmées, tailles de texte, options par défaut, positions des erreurs.
 
 La CI GitHub Actions lance les mêmes vérifications à chaque push sur `main` et sur chaque pull request. En local :
 
 ```bash
-cd src-tauri
-cargo fmt --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
 ```bash
@@ -107,9 +118,9 @@ npm run tauri build
 ```
 
 L'exécutable autonome sera généré dans :
-`src-tauri/target/release/glass-converter.exe`
+`target/release/glass-converter.exe`
 
-Le numéro de version se modifie uniquement dans `src-tauri/Cargo.toml` : Tauri le reprend automatiquement.
+Le numéro de version se modifie uniquement dans le `Cargo.toml` racine (`[workspace.package]`) : les crates et Tauri le reprennent automatiquement.
 
 ---
 
